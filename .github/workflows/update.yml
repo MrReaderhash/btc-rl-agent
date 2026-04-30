@@ -2,8 +2,8 @@ name: BTC RL Agent - Daily Update
 
 on:
   schedule:
-    - cron: '0 * * * *'  # Har ghante chalega
-  workflow_dispatch:  # Manual bhi chala sakte ho
+    - cron: '0 * * * *'
+  workflow_dispatch:
 
 jobs:
   update:
@@ -19,17 +19,19 @@ jobs:
         python-version: '3.11'
 
     - name: Install libraries
-      run: |
-        pip install ccxt pandas numpy gymnasium stable-baselines3
+      run: pip install ccxt pandas numpy gymnasium stable-baselines3
 
     - name: Run update
       run: |
         cd btc_rl_agent
         python update.py
 
-    - name: Save results
-      uses: actions/commit-files@v1
-      continue-on-error: true
-      with:
-        token: ${{ secrets.GITHUB_TOKEN }}
-        message: "Agent update - trades log saved"
+    - name: Save results to GitHub
+      run: |
+        git config --global user.email "action@github.com"
+        git config --global user.name "GitHub Action"
+        git add -A
+        git diff --staged --quiet || git commit -m "Agent update - $(date)"
+        git push
+      env:
+        GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
