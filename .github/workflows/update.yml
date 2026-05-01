@@ -28,6 +28,11 @@ jobs:
       run: |
         cd btc_rl_agent
         python update.py
+        
+    - name: Self Improve
+      run: |
+        cd btc_rl_agent
+        python self_improve.py
 
     - name: Save results to GitHub
       run: |
