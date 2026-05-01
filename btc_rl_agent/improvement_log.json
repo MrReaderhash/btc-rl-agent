@@ -1,0 +1,14 @@
+[
+  {
+    "date": "2026-05-01 09:58",
+    "win_rate": 26.0,
+    "balance": 9593.83,
+    "pnl": -406.17,
+    "trend": "improving",
+    "old_timesteps": 20000,
+    "new_timesteps": 30000,
+    "old_penalty": -0.009,
+    "new_penalty": -0.008,
+    "reason": "Win rate is less than 30%, so timesteps are increased by 10000 and penalty is reduced by 0.001."
+  }
+]
