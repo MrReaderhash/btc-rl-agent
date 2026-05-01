@@ -46,5 +46,17 @@
     "old_penalty": -0.007,
     "new_penalty": -0.007,
     "reason": "Win rate is within acceptable range and balance is improving, so no significant adjustments are needed."
+  },
+  {
+    "date": "2026-05-01 16:02",
+    "win_rate": 50.0,
+    "balance": 10221.88,
+    "pnl": 221.88,
+    "trend": "improving",
+    "old_timesteps": 40000,
+    "new_timesteps": 40000,
+    "old_penalty": -0.007,
+    "new_penalty": -0.006,
+    "reason": "Win rate is exactly 50% and balance is improving, so slight adjustment to penalty is made."
   }
 ]

@@ -62,7 +62,7 @@ class BTCTradingEnv(gym.Env):
             self.position = 0
             self.entry_price = 0.0
         elif action == 0 and self.position != 0:
-            reward = -0.007
+            reward = -0.006
         self.current_step += 1
         done = self.current_step >= len(self.df) - 1
         return self._get_obs(), reward, done, False, {}
