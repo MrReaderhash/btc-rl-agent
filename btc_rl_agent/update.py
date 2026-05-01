@@ -82,8 +82,8 @@ print(f"UPDATE: {datetime.now().strftime('%Y-%m-%d %H:%M')}")
 print(f"{'='*50}")
 
 print("\n1. Naya BTC data fetch ho raha hai...")
-exchange = ccxt.binance()
-ohlcv = exchange.fetch_ohlcv('BTC/USDT', timeframe='1h', limit=500)
+exchange = ccxt.kraken()
+ohlcv = exchange.fetch_ohlcv('BTC/USD', timeframe='1h', limit=500)
 new_df = pd.DataFrame(ohlcv, columns=['timestamp', 'open', 'high', 'low', 'close', 'volume'])
 new_df['timestamp'] = pd.to_datetime(new_df['timestamp'], unit='ms')
 
