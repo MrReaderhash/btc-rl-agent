@@ -62,7 +62,7 @@ class BTCTradingEnv(gym.Env):
             self.position = 0
             self.entry_price = 0.0
         elif action == 0 and self.position != 0:
-            reward = -0.01
+            reward = -0.009
         self.current_step += 1
         done = self.current_step >= len(self.df) - 1
         return self._get_obs(), reward, done, False, {}
@@ -82,8 +82,8 @@ print(f"UPDATE: {datetime.now().strftime('%Y-%m-%d %H:%M')}")
 print(f"{'='*50}")
 
 print("\n1. Naya BTC data fetch ho raha hai...")
-exchange = ccxt.kraken()
-ohlcv = exchange.fetch_ohlcv('BTC/USD', timeframe='1h', limit=500)
+exchange = ccxt.binance()
+ohlcv = exchange.fetch_ohlcv('BTC/USDT', timeframe='1h', limit=500)
 new_df = pd.DataFrame(ohlcv, columns=['timestamp', 'open', 'high', 'low', 'close', 'volume'])
 new_df['timestamp'] = pd.to_datetime(new_df['timestamp'], unit='ms')
 
@@ -111,7 +111,7 @@ else:
     model = PPO("MlpPolicy", train_env, verbose=0, n_steps=2048)
     print("   Naya model bana!")
 
-model.learn(total_timesteps=10000)
+model.learn(total_timesteps=20000)
 model.save("btc_rl_memory")
 print("   Model saved!")
 
