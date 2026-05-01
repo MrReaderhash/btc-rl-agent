@@ -22,7 +22,7 @@ jobs:
         python-version: '3.11'
 
     - name: Install libraries
-      run: pip install ccxt pandas numpy gymnasium stable-baselines3
+      run: pip install ccxt pandas numpy gymnasium stable-baselines3 groq
 
     - name: Run update
       run: |
