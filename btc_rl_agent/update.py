@@ -116,10 +116,15 @@ model.save("btc_rl_memory")
 print("   Model saved!")
 
 # =====================
-# STEP 3: PAPER TRADING
+# STEP 3: LIVE PAPER TRADING
 # =====================
-print("\n3. Paper trading...")
-live_df = train_df.tail(200).reset_index(drop=True)
+print("\n3. Live market data fetch kar raha hai...")
+live_ohlcv = exchange.fetch_ohlcv('BTC/USD', timeframe='1h', limit=100)
+live_df = pd.DataFrame(live_ohlcv, columns=['timestamp', 'open', 'high', 'low', 'close', 'volume'])
+live_df['timestamp'] = pd.to_datetime(live_df['timestamp'], unit='ms')
+live_df = live_df.reset_index(drop=True)
+print(f"   Live candles: {len(live_df)}")
+
 live_env = BTCTradingEnv(live_df)
 obs, _ = live_env.reset()
 
