@@ -14,7 +14,7 @@ def analyze_performance():
     if not os.path.exists('trades_log.csv'):
         return None
     
-    df = pd.read_csv('trades_log.csv')
+    df = pd.read_csv('trades_log.csv', on_bad_lines='skip')
     
     # Last 50 trades analyze karo
     recent = df.tail(50)
