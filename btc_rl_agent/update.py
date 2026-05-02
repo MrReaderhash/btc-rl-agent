@@ -7,6 +7,7 @@ from stable_baselines3 import PPO
 import os
 import csv
 from datetime import datetime, timezone, timedelta
+
 IST = timezone(timedelta(hours=5, minutes=30))
 
 def get_candle_features(candles):
@@ -78,8 +79,8 @@ class BTCTradingEnv(gym.Env):
 # =====================
 # STEP 1: NAYA DATA
 # =====================
-print(f"\n{'='*50}")
 now_ist = datetime.now(IST).strftime("%Y-%m-%d %H:%M")
+print(f"\n{'='*50}")
 print(f"UPDATE: {now_ist}")
 print(f"{'='*50}")
 
@@ -113,7 +114,7 @@ else:
     model = PPO("MlpPolicy", train_env, verbose=0, n_steps=2048)
     print("   Naya model bana!")
 
-model.learn(total_timesteps=210000)
+model.learn(total_timesteps=50000)
 model.save("btc_rl_memory")
 print("   Model saved!")
 
@@ -131,20 +132,47 @@ live_env = BTCTradingEnv(live_df)
 obs, _ = live_env.reset()
 
 trades_today = []
-actions_map = {0: 'HOLD', 1: 'BUY', 2: 'SHORT', 3: 'CLOSE'}
+prev_position = 0
 
 for _ in range(len(live_df) - 21):
     action, _ = model.predict(obs)
+    prev_position = live_env.position
     obs, reward, done, _, _ = live_env.step(action)
-    if reward != 0:
+    current_price = live_df['close'].iloc[live_env.current_step-1]
+    now_ist = datetime.now(IST).strftime("%Y-%m-%d %H:%M")
+
+    if action == 1 and prev_position == 0:
+        # Long entry
         trades_today.append({
-            'date': datetime.now(IST).strftime('%Y-%m-%d %H:%M'),
-            'action': actions_map[int(action)],
-            'price': live_df['close'].iloc[live_env.current_step-1],
+            'date': now_ist,
+            'action': 'LONG',
+            'price': current_price,
+            'profit_pct': 0,
+            'balance': round(live_env.balance, 2),
+            'result': 'OPEN'
+        })
+    elif action == 2 and prev_position == 0:
+        # Short entry
+        trades_today.append({
+            'date': now_ist,
+            'action': 'SHORT',
+            'price': current_price,
+            'profit_pct': 0,
+            'balance': round(live_env.balance, 2),
+            'result': 'OPEN'
+        })
+    elif action == 3 and prev_position != 0:
+        # Close position
+        close_label = 'LONG CLOSE' if prev_position == 1 else 'SHORT CLOSE'
+        trades_today.append({
+            'date': now_ist,
+            'action': close_label,
+            'price': current_price,
             'profit_pct': round(reward, 4),
             'balance': round(live_env.balance, 2),
             'result': 'WIN' if reward > 0 else 'LOSS'
         })
+
     if done:
         break
 
