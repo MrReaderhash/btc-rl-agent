@@ -190,5 +190,17 @@
     "old_penalty": -0.002,
     "new_penalty": -0.003,
     "reason": "Win rate is below 30% and balance is declining, so increase timesteps and reduce penalty."
+  },
+  {
+    "date": "2026-05-02 11:50",
+    "win_rate": 28.0,
+    "balance": 10518.29,
+    "pnl": 518.29,
+    "trend": "improving",
+    "old_timesteps": 130000,
+    "new_timesteps": 140000,
+    "old_penalty": -0.003,
+    "new_penalty": -0.004,
+    "reason": "Win rate is below 30%, so increasing timesteps and reducing penalty."
   }
 ]
