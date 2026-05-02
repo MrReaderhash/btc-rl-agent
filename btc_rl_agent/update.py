@@ -6,7 +6,8 @@ from gymnasium import spaces
 from stable_baselines3 import PPO
 import os
 import csv
-from datetime import datetime
+from datetime import datetime, timezone, timedelta
+IST = timezone(timedelta(hours=5, minutes=30))
 
 def get_candle_features(candles):
     features = []
@@ -78,7 +79,7 @@ class BTCTradingEnv(gym.Env):
 # STEP 1: NAYA DATA
 # =====================
 print(f"\n{'='*50}")
-print(f"UPDATE: {datetime.now().strftime('%Y-%m-%d %H:%M')}")
+print(f"UPDATE: datetime.now(IST).strftime('%Y-%m-%d %H:%M')
 print(f"{'='*50}")
 
 print("\n1. Naya BTC data fetch ho raha hai...")
@@ -136,7 +137,7 @@ for _ in range(len(live_df) - 21):
     obs, reward, done, _, _ = live_env.step(action)
     if reward != 0:
         trades_today.append({
-            'date': datetime.now().strftime('%Y-%m-%d %H:%M'),
+            'date': datetime.now(IST).strftime('%Y-%m-%d %H:%M'),
             'action': actions_map[int(action)],
             'price': live_df['close'].iloc[live_env.current_step-1],
             'profit_pct': round(reward, 4),
