@@ -79,7 +79,8 @@ class BTCTradingEnv(gym.Env):
 # STEP 1: NAYA DATA
 # =====================
 print(f"\n{'='*50}")
-print(f"UPDATE: datetime.now(IST).strftime('%Y-%m-%d %H:%M')
+now_ist = datetime.now(IST).strftime("%Y-%m-%d %H:%M")
+print(f"UPDATE: {now_ist}")
 print(f"{'='*50}")
 
 print("\n1. Naya BTC data fetch ho raha hai...")
