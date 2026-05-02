@@ -64,7 +64,7 @@ class BTCTradingEnv(gym.Env):
             self.position = 0
             self.entry_price = 0.0
         elif action == 0 and self.position != 0:
-            reward = -0.003
+            reward = -0.002
         self.current_step += 1
         done = self.current_step >= len(self.df) - 1
         return self._get_obs(), reward, done, False, {}
@@ -114,7 +114,7 @@ else:
     model = PPO("MlpPolicy", train_env, verbose=0, n_steps=2048)
     print("   Naya model bana!")
 
-model.learn(total_timesteps=50000)
+model.learn(total_timesteps=60000)
 model.save("btc_rl_memory")
 print("   Model saved!")
 
