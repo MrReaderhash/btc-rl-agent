@@ -334,8 +334,15 @@ print(f"UPDATE: {now_ist}")
 print(f"{'='*50}")
 
 print("\n1. Naya BTC data fetch ho raha hai...")
-exchange = ccxt.kraken()
-ohlcv = exchange.fetch_ohlcv('BTC/USD', timeframe='1h', limit=500)
+try:
+    exchange = ccxt.kraken()
+    ohlcv = exchange.fetch_ohlcv('BTC/USD', timeframe='1h', limit=500)
+    print("   Kraken se data mila!")
+except:
+    print("   Kraken fail — Binance try kar raha hai...")
+    exchange = ccxt.binance()
+    ohlcv = exchange.fetch_ohlcv('BTC/USDT', timeframe='1h', limit=500)
+    print("   Binance se data mila!")
 new_df = pd.DataFrame(ohlcv, columns=['timestamp', 'open', 'high', 'low', 'close', 'volume'])
 new_df['timestamp'] = pd.to_datetime(new_df['timestamp'], unit='ms')
 
@@ -366,7 +373,11 @@ print("   Model saved!")
 # STEP 3: LIVE PAPER TRADING
 # =====================
 print("\n3. Live market data fetch kar raha hai...")
-live_ohlcv = exchange.fetch_ohlcv('BTC/USD', timeframe='1h', limit=100)
+try:
+    live_ohlcv = exchange.fetch_ohlcv('BTC/USD', timeframe='1h', limit=100)
+except:
+    exchange = ccxt.binance()
+    live_ohlcv = exchange.fetch_ohlcv('BTC/USDT', timeframe='1h', limit=100)
 live_df = pd.DataFrame(live_ohlcv, columns=['timestamp', 'open', 'high', 'low', 'close', 'volume'])
 live_df['timestamp'] = pd.to_datetime(live_df['timestamp'], unit='ms')
 live_df = live_df.reset_index(drop=True)
