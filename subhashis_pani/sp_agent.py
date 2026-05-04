@@ -374,8 +374,15 @@ knowledge = load_knowledge()
 
 # Data fetch
 print("\n1. BTC data fetch ho raha hai...")
-exchange = ccxt.binance()
-ohlcv = exchange.fetch_ohlcv('BTC/USDT', timeframe='1h', limit=500)
+try:
+    exchange = ccxt.kraken()
+    ohlcv = exchange.fetch_ohlcv('BTC/USD', timeframe='1h', limit=500)
+    print("   Kraken se data mila!")
+except:
+    import time
+    time.sleep(5)
+    exchange = ccxt.kraken()
+    ohlcv = exchange.fetch_ohlcv('BTC/USD', timeframe='1h', limit=500)
 new_df = pd.DataFrame(ohlcv, columns=['timestamp', 'open', 'high', 'low', 'close', 'volume'])
 new_df['timestamp'] = pd.to_datetime(new_df['timestamp'], unit='ms')
 
@@ -410,7 +417,12 @@ print("   Model saved!")
 
 # Live paper trading
 print("\n3. Live paper trading...")
-live_ohlcv = exchange.fetch_ohlcv('BTC/USD', timeframe='1h', limit=100)
+try:
+    live_ohlcv = exchange.fetch_ohlcv('BTC/USD', timeframe='1h', limit=100)
+except:
+    import time
+    time.sleep(5)
+    live_ohlcv = exchange.fetch_ohlcv('BTC/USD', timeframe='1h', limit=100)
 live_df = pd.DataFrame(live_ohlcv, columns=['timestamp', 'open', 'high', 'low', 'close', 'volume'])
 live_df['timestamp'] = pd.to_datetime(live_df['timestamp'], unit='ms')
 live_df = live_df.reset_index(drop=True)
