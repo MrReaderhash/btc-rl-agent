@@ -1,0 +1,40 @@
+name: Subhashish Pani RL Agent
+
+on:
+  schedule:
+    - cron: '30 * * * *'  # Har ghante 30 minute pe
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  update:
+    runs-on: ubuntu-latest
+
+    steps:
+    - name: Checkout code
+      uses: actions/checkout@v3
+
+    - name: Setup Python
+      uses: actions/setup-python@v4
+      with:
+        python-version: '3.11'
+
+    - name: Install libraries
+      run: pip install ccxt pandas numpy gymnasium stable-baselines3
+
+    - name: Run SP Agent
+      run: |
+        cd subhashis_pani
+        python sp_agent.py
+
+    - name: Save results
+      run: |
+        git config --global user.email "action@github.com"
+        git config --global user.name "GitHub Action"
+        git add -A
+        git diff --staged --quiet || git commit -m "SP Agent update - $(date)"
+        git push
+      env:
+        GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
