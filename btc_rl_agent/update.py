@@ -192,7 +192,7 @@ class BTCTradingEnv(gym.Env):
 
             # 1:3 RR check — agar nahi banta toh trade mat lo
             if sl_distance <= 0 or sl_distance > current_price * 0.05:
-                reward = -0.003  # Invalid setup
+                reward = -0.004  # Invalid setup
             else:
                 self.position = 1
                 self.entry_price = current_price
@@ -211,7 +211,7 @@ class BTCTradingEnv(gym.Env):
             sl_distance = sl - current_price
 
             if sl_distance <= 0 or sl_distance > current_price * 0.05:
-                reward = -0.003
+                reward = -0.004
             else:
                 self.position = -1
                 self.entry_price = current_price
@@ -297,7 +297,7 @@ class BTCTradingEnv(gym.Env):
                 elif self.position == -1 and current_price < self.entry_price:
                     reward = 0.005
                 else:
-                    reward = -0.003  # Loss mein hold — bad!
+                    reward = -0.004  # Loss mein hold — bad!
 
             if forced_close:
                 self.position = 0
@@ -365,7 +365,7 @@ train_env = BTCTradingEnv(train_df)
 
 print("   Naya improved model bana raha hai...")
 model = PPO("MlpPolicy", train_env, verbose=0, n_steps=2048, batch_size=64)
-model.learn(total_timesteps=320000)
+model.learn(total_timesteps=330000)
 model.save("btc_rl_memory")
 print("   Model saved!")
 
