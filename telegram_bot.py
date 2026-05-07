@@ -314,8 +314,8 @@ Time: {datetime.now(IST).strftime('%H:%M IST')}"""
         df = get_btc_ohlcv()
         return analyze_btc_pattern(df)
 
-    # Agent 1 trades
-    elif any(w in text_lower for w in ['agent 1', 'btc rl', 'pehla agent']):
+    # Agent 1 trades — IMPROVE pehle check hoga
+    elif any(w in text_lower for w in ['agent 1', 'btc rl', 'pehla agent']) and not any(w in text_lower for w in ['improve', 'better', 'fix', 'theek', 'sudharo']):
         if any(w in text_lower for w in ['performance', 'summary', 'overall']):
             return get_agent_performance('trades_log.csv', 'Agent 1 (BTC RL)')
         n = 10
@@ -325,8 +325,8 @@ Time: {datetime.now(IST).strftime('%H:%M IST')}"""
                 break
         return read_trades('trades_log.csv', n, 'Agent 1 (BTC RL)')
 
-    # Agent 2 trades
-    elif any(w in text_lower for w in ['agent 2', 'sp agent', 'dusra agent', 'subhashis']):
+    # Agent 2 trades — IMPROVE pehle check hoga
+    elif any(w in text_lower for w in ['agent 2', 'sp agent', 'dusra agent', 'subhashis']) and not any(w in text_lower for w in ['improve', 'better', 'fix', 'theek', 'sudharo']):
         if any(w in text_lower for w in ['performance', 'summary', 'overall']):
             return get_agent_performance('sp_trades_log.csv', 'Agent 2 (SP Agent)')
         n = 10
@@ -376,8 +376,39 @@ Time: {datetime.now(IST).strftime('%H:%M IST')}"""
 
 💬 *Aur bhi kuch poocho — main samjhunga!*"""
 
+    # IMPROVE request
+    elif any(w in text_lower for w in ['improve', 'better kar', 'fix kar', 'theek kar', 'improve karo', 'sudharo']):
+        if 'agent 1' in text_lower or 'btc rl' in text_lower or 'pehla' in text_lower:
+            perf = get_agent_performance('trades_log.csv', 'Agent 1 (BTC RL)')
+            suggestions = """
+🛠 *Agent 1 Improve Karne Ke Suggestions:*
+
+1 Timesteps badhao: model.learn(total_timesteps=100000)
+2 Stop Loss 5% se 3% karo
+3 Cooldown 3 se 2 karo
+4 Data limit 500 se 1000 karo
+5 Reward function tune karo"""
+            return perf + suggestions
+
+        elif 'agent 2' in text_lower or 'sp' in text_lower or 'dusra' in text_lower:
+            perf = get_agent_performance('sp_trades_log.csv', 'Agent 2 (SP Agent)')
+            suggestions = """
+🛠 *Agent 2 Improve Karne Ke Suggestions:*
+
+1 Knowledge base update karo
+2 Timesteps badhao: model.learn(total_timesteps=100000)
+3 Market structure weight badhao
+4 RR ratio 1:3 se 1:4 karo
+5 Win rate 50% se upar lao"""
+            return perf + suggestions
+
+        else:
+            a1 = get_agent_performance('trades_log.csv', 'Agent 1')
+            a2 = get_agent_performance('sp_trades_log.csv', 'Agent 2')
+            return a1 + chr(10)*2 + '='*20 + chr(10)*2 + a2 + chr(10)*2 + 'Kaunsa improve karna hai? agent 1 ya agent 2 bolو'
+
     # Claude AI se handle karo
-    else:
+
         # Gather context
         context_parts = []
         price, change, _ = get_btc_price()
