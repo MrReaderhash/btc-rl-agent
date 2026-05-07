@@ -81,7 +81,7 @@ jobs:
       - name: 🤖 Run Agent 1
         run: |
           cd btc_rl_agent
-          python btc_rl_agent.py
+          python update.py
 
       - name: 💾 Save logs
         run: |
@@ -129,7 +129,7 @@ jobs:
       - name: 🤖 Run Agent 2
         run: |
           cd subhashis_pani
-          python subhashis_pani_agent.py
+          python sp_agent.py
 
       - name: 💾 Save logs
         run: |
