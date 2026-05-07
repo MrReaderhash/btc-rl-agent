@@ -1,0 +1,149 @@
+name: 🤖 Trading Bot 24/7
+
+on:
+  push:
+    branches: [main]
+  workflow_dispatch:
+  schedule:
+    # Har 6 ghante agents run honge
+    - cron: '0 */6 * * *'
+
+jobs:
+  # ================================
+  # JOB 1: TELEGRAM BOT (24/7)
+  # ================================
+  telegram-bot:
+    name: 📱 Telegram Bot
+    runs-on: ubuntu-latest
+    if: github.event_name == 'push' || github.event_name == 'workflow_dispatch'
+    timeout-minutes: 350  # ~6 hours
+
+    steps:
+      - name: 📥 Checkout
+        uses: actions/checkout@v4
+
+      - name: 🐍 Python Setup
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+
+      - name: 📦 Install packages
+        run: |
+          pip install requests pandas numpy
+
+      - name: 🤖 Start Telegram Bot
+        env:
+          TELEGRAM_BOT_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
+          TELEGRAM_CHAT_ID: ${{ secrets.TELEGRAM_CHAT_ID }}
+          CLAUDE_API_KEY: ${{ secrets.CLAUDE_API_KEY }}
+        run: |
+          # Check karo log files GitHub se aaye hain
+          echo "📂 Files check:"
+          ls -la *.csv 2>/dev/null || echo "No CSV files yet"
+          
+          # Bot chalao
+          python telegram_bot.py
+
+  # ================================
+  # JOB 2: AGENT 1 TRAINING (Scheduled)
+  # ================================
+  run-agent1:
+    name: 🤖 Agent 1 (BTC RL)
+    runs-on: ubuntu-latest
+    if: github.event_name == 'schedule' || github.event_name == 'workflow_dispatch'
+    timeout-minutes: 60
+
+    steps:
+      - name: 📥 Checkout
+        uses: actions/checkout@v4
+
+      - name: 🐍 Python Setup
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+
+      - name: 📦 Install packages
+        run: |
+          pip install ccxt pandas numpy gymnasium stable-baselines3 torch
+
+      - name: 🔄 Restore previous data
+        uses: actions/cache@v4
+        with:
+          path: |
+            btc_data_full.csv
+            btc_rl_memory.zip
+          key: agent1-data-${{ github.run_number }}
+          restore-keys: agent1-data-
+
+      - name: 🔄 Restore trade logs
+        uses: actions/cache@v4
+        with:
+          path: trades_log.csv
+          key: agent1-trades-${{ github.run_number }}
+          restore-keys: agent1-trades-
+
+      - name: 🤖 Run Agent 1
+        run: |
+          cd btc_rl_agent
+          python btc_rl_agent.py
+
+      - name: 💾 Save trade log to repo
+        run: |
+          cp btc_rl_agent/trades_log.csv trades_log.csv 2>/dev/null || true
+          git config user.name "Trading Bot"
+          git config user.email "bot@trading.com"
+          git add trades_log.csv || true
+          git diff --staged --quiet || git commit -m "🤖 Agent 1 trades update $(date '+%Y-%m-%d %H:%M')"
+          git push || true
+
+  # ================================
+  # JOB 3: AGENT 2 TRAINING (Scheduled)
+  # ================================
+  run-agent2:
+    name: 🤖 Agent 2 (SP Agent)
+    runs-on: ubuntu-latest
+    if: github.event_name == 'schedule' || github.event_name == 'workflow_dispatch'
+    timeout-minutes: 60
+
+    steps:
+      - name: 📥 Checkout
+        uses: actions/checkout@v4
+
+      - name: 🐍 Python Setup
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+
+      - name: 📦 Install packages
+        run: |
+          pip install ccxt pandas numpy gymnasium stable-baselines3 torch
+
+      - name: 🔄 Restore previous data
+        uses: actions/cache@v4
+        with:
+          path: |
+            sp_btc_data.csv
+            sp_rl_model.zip
+          key: agent2-data-${{ github.run_number }}
+          restore-keys: agent2-data-
+
+      - name: 🔄 Restore trade logs
+        uses: actions/cache@v4
+        with:
+          path: sp_trades_log.csv
+          key: agent2-trades-${{ github.run_number }}
+          restore-keys: agent2-trades-
+
+      - name: 🤖 Run Agent 2
+        run: |
+          cd subhashis_pani
+          python subhashis_pani_agent.py
+
+      - name: 💾 Save trade log to repo
+        run: |
+          cp subhashis_pani/sp_trades_log.csv sp_trades_log.csv 2>/dev/null || true
+          git config user.name "Trading Bot"
+          git config user.email "bot@trading.com"
+          git add sp_trades_log.csv || true
+          git diff --staged --quiet || git commit -m "🤖 Agent 2 trades update $(date '+%Y-%m-%d %H:%M')"
+          git push || true
