@@ -45,6 +45,36 @@ def get_btc_price():
 # BTC OHLCV DATA - FREE
 # =====================
 def get_btc_ohlcv(limit=100):
+    """Multiple free APIs se OHLCV data"""
+    # Binance
+    try:
+        url = "https://api.binance.com/api/v3/klines?symbol=BTCUSDT&interval=1h&limit=" + str(limit)
+        r = requests.get(url, timeout=10)
+        if r.status_code == 200:
+            data = r.json()
+            df = pd.DataFrame(data, columns=['timestamp','open','high','low','close','volume','a','b','c','d','e','f'])
+            df['timestamp'] = pd.to_datetime(df['timestamp'], unit='ms')
+            for col in ['open','high','low','close','volume']:
+                df[col] = df[col].astype(float)
+            return df[['timestamp','open','high','low','close','volume']]
+    except: pass
+
+    # Bybit fallback
+    try:
+        url = "https://api.bybit.com/v5/market/kline?category=spot&symbol=BTCUSDT&interval=60&limit=" + str(limit)
+        r = requests.get(url, timeout=10)
+        if r.status_code == 200:
+            rows = r.json()['result']['list']
+            df = pd.DataFrame(rows, columns=['timestamp','open','high','low','close','volume','turnover'])
+            df['timestamp'] = pd.to_datetime(df['timestamp'].astype(float), unit='ms')
+            for col in ['open','high','low','close','volume']:
+                df[col] = df[col].astype(float)
+            return df[['timestamp','open','high','low','close','volume']].sort_values('timestamp').reset_index(drop=True)
+    except: pass
+
+    return None
+
+def get_btc_ohlcv_OLD(limit=100):
     """Binance public API se OHLCV - no key needed"""
     try:
         url = f"https://api.binance.com/api/v3/klines?symbol=BTCUSDT&interval=1h&limit={limit}"
@@ -310,8 +340,14 @@ Time: {datetime.now(IST).strftime('%H:%M IST')}"""
         return "❌ BTC price fetch nahi ho paya, thodi der mein try karo"
 
     # BTC Analysis / Pattern
-    elif any(w in text_lower for w in ['analysis', 'pattern', 'setup', 'trend', 'signal', 'kya ban raha']):
+    elif any(w in text_lower for w in ['analysis', 'pattern', 'setup', 'trend', 'signal', 'kya ban raha', 'kahan', 'kaha', 'kya chal', 'setup ban', 'btc mein']):
         df = get_btc_ohlcv()
+        if df is None:
+            price, change, _ = get_btc_price()
+            if price:
+                emoji = "📈" if change and change > 0 else "📉"
+                return "📊 *BTC Status*\n\n💰 Price: $" + str(f"{price:,.0f}") + "\n24h: " + str(f"{change:+.2f}") + "% " + emoji + "\n\n⚠️ Chart data abhi nahi mila — thodi der mein dobara try karo"
+            return "❌ Data fetch nahi ho pa raha abhi — 1-2 minute mein try karo"
         return analyze_btc_pattern(df)
 
     # Agent 1 trades — IMPROVE pehle check hoga
@@ -376,36 +412,16 @@ Time: {datetime.now(IST).strftime('%H:%M IST')}"""
 
 💬 *Aur bhi kuch poocho — main samjhunga!*"""
 
-    # IMPROVE request
+    # IMPROVE + AUTO FIX request
     elif any(w in text_lower for w in ['improve', 'better kar', 'fix kar', 'theek kar', 'improve karo', 'sudharo']):
         if 'agent 1' in text_lower or 'btc rl' in text_lower or 'pehla' in text_lower:
-            perf = get_agent_performance('trades_log.csv', 'Agent 1 (BTC RL)')
-            suggestions = """
-🛠 *Agent 1 Improve Karne Ke Suggestions:*
-
-1 Timesteps badhao: model.learn(total_timesteps=100000)
-2 Stop Loss 5% se 3% karo
-3 Cooldown 3 se 2 karo
-4 Data limit 500 se 1000 karo
-5 Reward function tune karo"""
-            return perf + suggestions
-
+            send_message("🔧 *Agent 1 improve ho raha hai...*\n\nGitHub se code fetch kar raha hoon!")
+            return auto_fix_agent(1)
         elif 'agent 2' in text_lower or 'sp' in text_lower or 'dusra' in text_lower:
-            perf = get_agent_performance('sp_trades_log.csv', 'Agent 2 (SP Agent)')
-            suggestions = """
-🛠 *Agent 2 Improve Karne Ke Suggestions:*
-
-1 Knowledge base update karo
-2 Timesteps badhao: model.learn(total_timesteps=100000)
-3 Market structure weight badhao
-4 RR ratio 1:3 se 1:4 karo
-5 Win rate 50% se upar lao"""
-            return perf + suggestions
-
+            send_message("🔧 *Agent 2 improve ho raha hai...*\n\nGitHub se code fetch kar raha hoon!")
+            return auto_fix_agent(2)
         else:
-            a1 = get_agent_performance('trades_log.csv', 'Agent 1')
-            a2 = get_agent_performance('sp_trades_log.csv', 'Agent 2')
-            return a1 + chr(10)*2 + '='*20 + chr(10)*2 + a2 + chr(10)*2 + 'Kaunsa improve karna hai? agent 1 ya agent 2 bolو'
+            return "*Kaunsa agent improve karna hai?*\n\n• `agent 1 improve karo`\n• `agent 2 improve karo`"
 
     # Claude AI se handle karo
 
@@ -516,3 +532,101 @@ def main():
 
 if __name__ == "__main__":
     main()
+
+# =====================
+# AUTO CODE FIX
+# =====================
+GH_TOKEN = os.environ.get("GH_TOKEN_BOT")
+REPO_OWNER = "MrReaderhash"
+REPO_NAME = "btc-rl-agent"
+
+def get_github_file(filepath):
+    if not GH_TOKEN:
+        return None, None
+    import base64
+    url = "https://api.github.com/repos/" + REPO_OWNER + "/" + REPO_NAME + "/contents/" + filepath
+    r = requests.get(url, headers={
+        "Authorization": "token " + GH_TOKEN,
+        "Accept": "application/vnd.github.v3+json"
+    }, timeout=10)
+    if r.status_code == 200:
+        data = r.json()
+        code = base64.b64decode(data['content']).decode('utf-8')
+        return code, data['sha']
+    return None, None
+
+def update_github_file(filepath, new_content, sha, commit_msg):
+    if not GH_TOKEN:
+        return False
+    import base64
+    url = "https://api.github.com/repos/" + REPO_OWNER + "/" + REPO_NAME + "/contents/" + filepath
+    r = requests.put(url, headers={
+        "Authorization": "token " + GH_TOKEN,
+        "Accept": "application/vnd.github.v3+json"
+    }, json={
+        "message": commit_msg,
+        "content": base64.b64encode(new_content.encode()).decode(),
+        "sha": sha
+    }, timeout=15)
+    return r.status_code in [200, 201]
+
+def auto_fix_agent(agent_num):
+    if agent_num == 1:
+        filepath = "btc_rl_agent/update.py"
+        log_file = "trades_log.csv"
+        agent_name = "Agent 1 (BTC RL)"
+    else:
+        filepath = "subhashis_pani/sp_agent.py"
+        log_file = "sp_trades_log.csv"
+        agent_name = "Agent 2 (SP Agent)"
+
+    try:
+        df = pd.read_csv(log_file)
+        closed = df[df['result'].isin(['WIN', 'LOSS'])]
+        wins = len(closed[closed['result'] == 'WIN'])
+        total = len(closed)
+        win_rate = round(wins / total * 100, 1) if total > 0 else 0
+    except:
+        win_rate = 0
+        total = 0
+
+    code, sha = get_github_file(filepath)
+    if not code:
+        return "GitHub se code nahi mila! GH_TOKEN_BOT check karo."
+
+    prompt = "Yeh " + agent_name + " ka Python trading agent code hai. Win rate: " + str(win_rate) + "%. Improve karo: 1) total_timesteps=50000 rakho 2) Binance API use karo 3) Better reward function 4) Risk management. Sirf complete Python code do:\n\n" + code[:2000]
+
+    if not GROQ_API_KEY:
+        return "GROQ_API_KEY missing!"
+
+    try:
+        r = requests.post(
+            "https://api.groq.com/openai/v1/chat/completions",
+            headers={"Authorization": "Bearer " + GROQ_API_KEY, "Content-Type": "application/json"},
+            json={
+                "model": "llama-3.3-70b-versatile",
+                "messages": [{"role": "user", "content": prompt}],
+                "max_tokens": 4000,
+                "temperature": 0.3
+            },
+            timeout=60
+        )
+        if r.status_code != 200:
+            return "Groq error: " + str(r.status_code)
+
+        improved = r.json()["choices"][0]["message"]["content"]
+
+        if "```python" in improved:
+            improved = improved.split("```python")[1].split("```")[0].strip()
+        elif "```" in improved:
+            improved = improved.split("```")[1].split("```")[0].strip()
+
+        success = update_github_file(filepath, improved, sha, "Auto-improved " + agent_name)
+
+        if success:
+            return "✅ *" + agent_name + " Auto-Fixed!*\n\nWin Rate: " + str(win_rate) + "%\nTrades: " + str(total) + "\nGitHub pe code update ho gaya!\nNext run mein improved agent chalega!"
+        else:
+            return "GitHub update fail! Token permissions check karo."
+
+    except Exception as e:
+        return "Error: " + str(e)
