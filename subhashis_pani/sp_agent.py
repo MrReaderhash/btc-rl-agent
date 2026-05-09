@@ -357,9 +357,9 @@ knowledge = load_knowledge()
 
 print("\n1. BTC data fetch ho raha hai...")
 try:
-    exchange = ccxt.binance()
-    ohlcv = exchange.fetch_ohlcv('BTC/USDT', timeframe='1h', limit=500)
-    print("   Binance se data mila!")
+    exchange = ccxt.kraken()
+    ohlcv = exchange.fetch_ohlcv('BTC/USD', timeframe='1h', limit=500)
+    print("   Kraken se data mila!")
 except Exception as e:
     print(f"   Error: {e}")
     raise
@@ -397,7 +397,7 @@ print("   Model saved!")
 
 print("\n3. Live paper trading...")
 try:
-    live_ohlcv = exchange.fetch_ohlcv('BTC/USDT', timeframe='1h', limit=100)
+    live_ohlcv = exchange.fetch_ohlcv('BTC/USD', timeframe='1h', limit=100)
 except Exception as e:
     print(f"   Live data error: {e}")
     raise
