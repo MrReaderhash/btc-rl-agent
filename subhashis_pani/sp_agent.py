@@ -105,8 +105,8 @@ else:
             self.total_trades = 0
             self.winning_trades = 0
 
-         self.action_space = spaces.Discrete(4)
-         self.observation_space = spaces.Box(
+            self.action_space = spaces.Discrete(4)
+            self.observation_space = spaces.Box(
             low=-np.inf, high=np.inf, shape=(185,), dtype=np.float32
         )
 
