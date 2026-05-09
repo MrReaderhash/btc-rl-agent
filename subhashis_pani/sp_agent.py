@@ -100,6 +100,7 @@ class SPTradingEnv(gym.Env):
         self.hold_count = 0
         self.cooldown = 0
         self.recent_trades = []
+        self.max_trades_per_session = 3   # FIX: max 3 trades per session
         self.total_trades = 0
         self.winning_trades = 0
 
@@ -199,7 +200,9 @@ class SPTradingEnv(gym.Env):
         self.recent_trades.append(1 if action in [1, 2] else 0)
         if len(self.recent_trades) > 5:
             self.recent_trades.pop(0)
-        overtrade = sum(self.recent_trades) >= 3
+
+        # FIX: overtrade threshold 3→2, plus session trade limit
+        overtrade = sum(self.recent_trades) >= 2 or self.total_trades >= self.max_trades_per_session
 
         market_str = get_market_structure(self.df, self.current_step)
 
@@ -207,13 +210,18 @@ class SPTradingEnv(gym.Env):
             if overtrade:
                 reward = -0.05
             else:
-                sl = find_swing_low(self.df, self.current_step)
+                # FIX: 0.5% SL — swing low ya 0.5%, jo bhi price ke closer ho
+                swing_sl    = find_swing_low(self.df, self.current_step)
+                max_sl      = current_price * 0.995          # 0.5% below entry
+                sl          = max(swing_sl, max_sl)           # closer SL use karo
                 sl_distance = current_price - sl
                 trend_bonus = 0.01 if market_str == 1.0 else -0.01
-                if sl_distance <= 0 or sl_distance > current_price * 0.05:
+
+                # FIX: reject if SL distance > 0.5% (0.05 → 0.005)
+                if sl_distance <= 0 or sl_distance > current_price * 0.005:
                     reward = -0.01
                 else:
-                    target = current_price + (sl_distance * 3)
+                    target = current_price + (sl_distance * 3)   # 3:1 RR
                     self.position = 1
                     self.entry_price = current_price
                     self.stop_loss = sl
@@ -227,13 +235,18 @@ class SPTradingEnv(gym.Env):
             if overtrade:
                 reward = -0.05
             else:
-                sl = find_swing_high(self.df, self.current_step)
+                # FIX: 0.5% SL — swing high ya 0.5%, jo bhi price ke closer ho
+                swing_sl    = find_swing_high(self.df, self.current_step)
+                max_sl      = current_price * 1.005          # 0.5% above entry
+                sl          = min(swing_sl, max_sl)           # closer SL use karo
                 sl_distance = sl - current_price
                 trend_bonus = 0.01 if market_str == -1.0 else -0.01
-                if sl_distance <= 0 or sl_distance > current_price * 0.05:
+
+                # FIX: reject if SL distance > 0.5% (0.05 → 0.005)
+                if sl_distance <= 0 or sl_distance > current_price * 0.005:
                     reward = -0.01
                 else:
-                    target = current_price - (sl_distance * 3)
+                    target = current_price - (sl_distance * 3)   # 3:1 RR
                     self.position = -1
                     self.entry_price = current_price
                     self.stop_loss = sl
@@ -309,7 +322,7 @@ class SPTradingEnv(gym.Env):
                 self.target = 0.0
                 self.trailing_sl = 0.0
                 self.hold_count = 0
-                self.cooldown = 3
+                self.cooldown = 5   # FIX: cooldown 3 → 5
 
         self.current_step += 1
         done = self.current_step >= len(self.df) - 1
@@ -326,6 +339,7 @@ class SPTradingEnv(gym.Env):
         self.hold_count = 0
         self.cooldown = 0
         self.recent_trades = []
+        self.max_trades_per_session = 3   # FIX: reset ke time bhi reset
         self.total_trades = 0
         self.winning_trades = 0
         return self._get_obs(), {}
