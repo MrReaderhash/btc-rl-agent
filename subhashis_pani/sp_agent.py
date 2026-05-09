@@ -76,8 +76,24 @@ class SPTradingEnv(gym.Env):
         self.df = df.reset_index(drop=True)
         self.knowledge = knowledge
         self.current_step = 60
+        # Last balance CSV se padho
+log_file = 'sp_trades_log.csv'
+if os.path.exists(log_file):
+    try:
+        old_log = pd.read_csv(log_file)
+        if len(old_log) > 0:
+            last_balance = float(old_log['balance'].iloc[-1])
+            self.balance = last_balance
+            self.initial_balance = last_balance
+        else:
+            self.balance = 10000.0
+            self.initial_balance = 10000.0
+    except:
         self.balance = 10000.0
         self.initial_balance = 10000.0
+else:
+    self.balance = 10000.0
+    self.initial_balance = 10000.0
         self.position = 0
         self.entry_price = 0.0
         self.stop_loss = 0.0
