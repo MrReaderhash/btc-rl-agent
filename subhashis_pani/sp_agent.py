@@ -89,24 +89,24 @@ if os.path.exists(log_file):
             self.balance = 10000.0
             self.initial_balance = 10000.0
     except:
-        self.balance = 10000.0
-        self.initial_balance = 10000.0
+            self.balance = 10000.0
+            self.initial_balance = 10000.0
 else:
-    self.balance = 10000.0
-    self.initial_balance = 10000.0
-        self.position = 0
-        self.entry_price = 0.0
-        self.stop_loss = 0.0
-        self.target = 0.0
-        self.trailing_sl = 0.0
-        self.hold_count = 0
-        self.cooldown = 0
-        self.recent_trades = []
-        self.total_trades = 0
-        self.winning_trades = 0
+            self.balance = 10000.0
+            self.initial_balance = 10000.0
+            self.position = 0
+            self.entry_price = 0.0
+            self.stop_loss = 0.0
+            self.target = 0.0
+            self.trailing_sl = 0.0
+            self.hold_count = 0
+            self.cooldown = 0
+            self.recent_trades = []
+            self.total_trades = 0
+            self.winning_trades = 0
 
-        self.action_space = spaces.Discrete(4)
-        self.observation_space = spaces.Box(
+         self.action_space = spaces.Discrete(4)
+         self.observation_space = spaces.Box(
             low=-np.inf, high=np.inf, shape=(185,), dtype=np.float32
         )
 
