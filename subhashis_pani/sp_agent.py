@@ -29,25 +29,20 @@ def load_knowledge():
 # MARKET STRUCTURE
 # =====================
 def get_market_structure(df, current_step):
-    """Higher highs/lows = Uptrend, Lower highs/lows = Downtrend"""
     if current_step < 20:
         return 0
-
     highs = df['high'].iloc[current_step-20:current_step].values
     lows = df['low'].iloc[current_step-20:current_step].values
-
-    # Last 3 swing highs/lows compare karo
     recent_highs = highs[-10:]
     recent_lows = lows[-10:]
     older_highs = highs[:10]
     older_lows = lows[:10]
-
     if recent_highs.max() > older_highs.max() and recent_lows.min() > older_lows.min():
-        return 1.0   # Uptrend
+        return 1.0
     elif recent_highs.max() < older_highs.max() and recent_lows.min() < older_lows.min():
-        return -1.0  # Downtrend
+        return -1.0
     else:
-        return 0.0   # Sideways
+        return 0.0
 
 def find_swing_low(df, current_step, lookback=10):
     return df['low'].iloc[current_step-lookback:current_step].min()
@@ -76,37 +71,40 @@ class SPTradingEnv(gym.Env):
         self.df = df.reset_index(drop=True)
         self.knowledge = knowledge
         self.current_step = 60
-        # Last balance CSV se padho
-log_file = 'sp_trades_log.csv'
-if os.path.exists(log_file):
-    try:
-        old_log = pd.read_csv(log_file)
-        if len(old_log) > 0:
-            last_balance = float(old_log['balance'].iloc[-1])
-            self.balance = last_balance
-            self.initial_balance = last_balance
-        else:
-            self.balance = 10000.0
-            self.initial_balance = 10000.0
-    except:
-            self.balance = 10000.0
-            self.initial_balance = 10000.0
-else:
-            self.balance = 10000.0
-            self.initial_balance = 10000.0
-            self.position = 0
-            self.entry_price = 0.0
-            self.stop_loss = 0.0
-            self.target = 0.0
-            self.trailing_sl = 0.0
-            self.hold_count = 0
-            self.cooldown = 0
-            self.recent_trades = []
-            self.total_trades = 0
-            self.winning_trades = 0
 
-            self.action_space = spaces.Discrete(4)
-            self.observation_space = spaces.Box(
+        # Last balance CSV se padho — reset nahi hoga!
+        log_file = 'sp_trades_log.csv'
+        try:
+            if os.path.exists(log_file):
+                old_log = pd.read_csv(log_file)
+                if len(old_log) > 0:
+                    last_balance = float(old_log['balance'].iloc[-1])
+                    self.balance = last_balance
+                    self.initial_balance = last_balance
+                    print(f"   Balance restored: ${last_balance:.2f}")
+                else:
+                    self.balance = 10000.0
+                    self.initial_balance = 10000.0
+            else:
+                self.balance = 10000.0
+                self.initial_balance = 10000.0
+        except:
+            self.balance = 10000.0
+            self.initial_balance = 10000.0
+
+        self.position = 0
+        self.entry_price = 0.0
+        self.stop_loss = 0.0
+        self.target = 0.0
+        self.trailing_sl = 0.0
+        self.hold_count = 0
+        self.cooldown = 0
+        self.recent_trades = []
+        self.total_trades = 0
+        self.winning_trades = 0
+
+        self.action_space = spaces.Discrete(4)
+        self.observation_space = spaces.Box(
             low=-np.inf, high=np.inf, shape=(185,), dtype=np.float32
         )
 
@@ -114,17 +112,14 @@ else:
         window = self.df[['open', 'high', 'low', 'close', 'volume']].values
         candles_ohlc = self.df[['open', 'high', 'low', 'close']].values
 
-        # Last 20 candles OHLC
         candles_20 = candles_ohlc[self.current_step-20:self.current_step]
         normalized = (candles_20 - candles_20.mean(axis=0)) / (candles_20.std(axis=0) + 1e-8)
-        ohlc_flat = normalized.flatten()  # 80
+        ohlc_flat = normalized.flatten()
 
-        # Candle features
-        candle_feats = np.array(get_candle_features(candles_20), dtype=np.float32)  # 80
+        candle_feats = np.array(get_candle_features(candles_20), dtype=np.float32)
 
         current_price = candles_ohlc[self.current_step-1, 3]
 
-        # Breakout levels
         high_10 = candles_ohlc[self.current_step-10:self.current_step, 1].max()
         low_10  = candles_ohlc[self.current_step-10:self.current_step, 2].min()
         high_20 = candles_ohlc[self.current_step-20:self.current_step, 1].max()
@@ -140,25 +135,20 @@ else:
             (current_price - low_20)  / price_range,
             (current_price - high_50) / price_range,
             (current_price - low_50)  / price_range,
-        ], dtype=np.float32)  # 6
+        ], dtype=np.float32)
 
-        # Market structure
         market_structure = get_market_structure(self.df, self.current_step)
 
-        # Momentum
         closes = candles_ohlc[self.current_step-10:self.current_step, 3]
         mom_3  = (closes[-1] - closes[-3])  / (closes[-3]  + 1e-8)
         mom_5  = (closes[-1] - closes[-5])  / (closes[-5]  + 1e-8)
         mom_10 = (closes[-1] - closes[-10]) / (closes[-10] + 1e-8)
 
-        # Volatility
         volatility = closes.std() / (current_price + 1e-8)
 
-        # Volume
         vol = window[self.current_step-10:self.current_step, 4]
         vol_mean = vol.mean() + 1e-8
 
-        # Win rate
         win_rate = self.winning_trades / (self.total_trades + 1e-8)
 
         extra_feats = np.array([
@@ -171,9 +161,8 @@ else:
             float(self.cooldown) / 5.0,
             float(self.hold_count) / 20.0,
             win_rate,
-        ], dtype=np.float32)  # 11
+        ], dtype=np.float32)
 
-        # SL/Target features
         if self.position != 0 and self.stop_loss > 0:
             sl_dist  = abs(current_price - self.stop_loss)  / (current_price + 1e-8)
             tgt_dist = abs(self.target - current_price)     / (current_price + 1e-8)
@@ -187,9 +176,8 @@ else:
 
         trade_feats = np.array([
             sl_dist, tgt_dist, rr_ratio, current_pnl
-        ], dtype=np.float32)  # 4
+        ], dtype=np.float32)
 
-        # Total = 80+80+6+11+4 = 181 → pad to 185
         obs = np.concatenate([
             ohlc_flat, candle_feats, breakout_feats,
             extra_feats, trade_feats
@@ -204,33 +192,24 @@ else:
         reward = 0
         forced_close = False
 
-        # Cooldown
         if self.cooldown > 0:
             self.cooldown -= 1
             action = 0
 
-        # Overtrading check
         self.recent_trades.append(1 if action in [1, 2] else 0)
         if len(self.recent_trades) > 5:
             self.recent_trades.pop(0)
         overtrade = sum(self.recent_trades) >= 3
 
-        # Market structure
         market_str = get_market_structure(self.df, self.current_step)
 
-        # =====================
-        # LONG ENTRY
-        # =====================
         if action == 1 and self.position == 0:
             if overtrade:
                 reward = -0.05
             else:
                 sl = find_swing_low(self.df, self.current_step)
                 sl_distance = current_price - sl
-
-                # Knowledge based: long only in uptrend
                 trend_bonus = 0.01 if market_str == 1.0 else -0.01
-
                 if sl_distance <= 0 or sl_distance > current_price * 0.05:
                     reward = -0.01
                 else:
@@ -244,19 +223,13 @@ else:
                     self.total_trades += 1
                     reward = trend_bonus
 
-        # =====================
-        # SHORT ENTRY
-        # =====================
         elif action == 2 and self.position == 0:
             if overtrade:
                 reward = -0.05
             else:
                 sl = find_swing_high(self.df, self.current_step)
                 sl_distance = sl - current_price
-
-                # Knowledge based: short only in downtrend
                 trend_bonus = 0.01 if market_str == -1.0 else -0.01
-
                 if sl_distance <= 0 or sl_distance > current_price * 0.05:
                     reward = -0.01
                 else:
@@ -270,79 +243,60 @@ else:
                     self.total_trades += 1
                     reward = trend_bonus
 
-        # =====================
-        # POSITION MANAGEMENT
-        # =====================
         elif self.position != 0:
             self.hold_count += 1
 
             if self.position == 1:
-                # Update trailing SL
                 if current_price > self.entry_price:
                     new_trail = current_price - (self.entry_price - self.stop_loss)
                     self.trailing_sl = max(self.trailing_sl, new_trail)
 
-                # SL hit
                 if current_price <= self.trailing_sl:
                     profit = (current_price - self.entry_price) / self.entry_price
                     reward = profit * 150
                     self.balance *= (1 + profit)
                     forced_close = True
-
-                # Target hit
                 elif current_price >= self.target:
                     profit = (current_price - self.entry_price) / self.entry_price
-                    reward = profit * 200  # Bonus!
+                    reward = profit * 200
                     self.balance *= (1 + profit)
                     self.winning_trades += 1
                     forced_close = True
-
-                # Profit mein hold — good!
                 elif action == 0 and current_price > self.entry_price:
                     reward = 0.005
-
-                # Loss mein hold — bad!
                 elif action == 0 and current_price < self.entry_price:
                     reward = -0.005
 
             elif self.position == -1:
-                # Update trailing SL
                 if current_price < self.entry_price:
                     new_trail = current_price + (self.stop_loss - self.entry_price)
                     self.trailing_sl = min(self.trailing_sl, new_trail)
 
-                # SL hit
                 if current_price >= self.trailing_sl:
                     profit = (self.entry_price - current_price) / self.entry_price
                     reward = profit * 150
                     self.balance *= (1 + profit)
                     forced_close = True
-
-                # Target hit
                 elif current_price <= self.target:
                     profit = (self.entry_price - current_price) / self.entry_price
                     reward = profit * 200
                     self.balance *= (1 + profit)
                     self.winning_trades += 1
                     forced_close = True
-
                 elif action == 0 and current_price < self.entry_price:
                     reward = 0.005
                 elif action == 0 and current_price > self.entry_price:
                     reward = -0.005
 
-            # Manual close
             if action == 3 and not forced_close:
                 if self.position == 1:
                     profit = (current_price - self.entry_price) / self.entry_price
                 else:
                     profit = (self.entry_price - current_price) / self.entry_price
-
                 if profit > 0:
-                    reward = profit * 80  # Target nahi aaya — less reward
+                    reward = profit * 80
                 else:
                     reward = profit * 100
-
                 self.balance *= (1 + profit)
                 if profit > 0:
                     self.winning_trades += 1
@@ -385,20 +339,17 @@ print(f"SUBHASHISH PANI RL AGENT")
 print(f"Time: {now_ist}")
 print(f"{'='*50}")
 
-# Knowledge load
 knowledge = load_knowledge()
 
-# Data fetch
 print("\n1. BTC data fetch ho raha hai...")
 try:
-    exchange = ccxt.kraken()
-    ohlcv = exchange.fetch_ohlcv('BTC/USD', timeframe='1h', limit=500)
-    print("   Kraken se data mila!")
-except:
-    import time
-    time.sleep(5)
-    exchange = ccxt.kraken()
-    ohlcv = exchange.fetch_ohlcv('BTC/USD', timeframe='1h', limit=500)
+    exchange = ccxt.binance()
+    ohlcv = exchange.fetch_ohlcv('BTC/USDT', timeframe='1h', limit=500)
+    print("   Binance se data mila!")
+except Exception as e:
+    print(f"   Error: {e}")
+    raise
+
 new_df = pd.DataFrame(ohlcv, columns=['timestamp', 'open', 'high', 'low', 'close', 'volume'])
 new_df['timestamp'] = pd.to_datetime(new_df['timestamp'], unit='ms')
 
@@ -415,7 +366,6 @@ else:
 
 print(f"   Total candles: {len(train_df)}")
 
-# Train
 print("\n2. Training ho raha hai...")
 train_env = SPTradingEnv(train_df, knowledge)
 
@@ -431,14 +381,13 @@ model.learn(total_timesteps=50000)
 model.save(model_file)
 print("   Model saved!")
 
-# Live paper trading
 print("\n3. Live paper trading...")
 try:
-    live_ohlcv = exchange.fetch_ohlcv('BTC/USD', timeframe='1h', limit=100)
-except:
-    import time
-    time.sleep(5)
-    live_ohlcv = exchange.fetch_ohlcv('BTC/USD', timeframe='1h', limit=100)
+    live_ohlcv = exchange.fetch_ohlcv('BTC/USDT', timeframe='1h', limit=100)
+except Exception as e:
+    print(f"   Live data error: {e}")
+    raise
+
 live_df = pd.DataFrame(live_ohlcv, columns=['timestamp', 'open', 'high', 'low', 'close', 'volume'])
 live_df['timestamp'] = pd.to_datetime(live_df['timestamp'], unit='ms')
 live_df = live_df.reset_index(drop=True)
@@ -491,7 +440,6 @@ for _ in range(len(live_df) - 61):
     if done:
         break
 
-# Log
 log_file = 'sp_trades_log.csv'
 file_exists = os.path.exists(log_file)
 with open(log_file, 'a', newline='') as f:
