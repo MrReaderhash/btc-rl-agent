@@ -32,11 +32,11 @@ def get_market_structure(df, current_step):
     if current_step < 20:
         return 0
     highs = df['high'].iloc[current_step-20:current_step].values
-    lows = df['low'].iloc[current_step-20:current_step].values
+    lows  = df['low'].iloc[current_step-20:current_step].values
     recent_highs = highs[-10:]
-    recent_lows = lows[-10:]
-    older_highs = highs[:10]
-    older_lows = lows[:10]
+    recent_lows  = lows[-10:]
+    older_highs  = highs[:10]
+    older_lows   = lows[:10]
     if recent_highs.max() > older_highs.max() and recent_lows.min() > older_lows.min():
         return 1.0
     elif recent_highs.max() < older_highs.max() and recent_lows.min() < older_lows.min():
@@ -54,11 +54,11 @@ def get_candle_features(candles):
     features = []
     for c in candles:
         o, h, l, cl = c[0], c[1], c[2], c[3]
-        body = cl - o
+        body      = cl - o
         body_size = abs(body) / (h - l + 1e-8)
-        upper_wick = (h - max(o, cl)) / (h - l + 1e-8)
-        lower_wick = (min(o, cl) - l) / (h - l + 1e-8)
-        direction = 1.0 if body > 0 else -1.0
+        upper_wick  = (h - max(o, cl)) / (h - l + 1e-8)
+        lower_wick  = (min(o, cl) - l) / (h - l + 1e-8)
+        direction   = 1.0 if body > 0 else -1.0
         features.extend([body_size, upper_wick, lower_wick, direction])
     return features
 
@@ -68,11 +68,11 @@ def get_candle_features(candles):
 class SPTradingEnv(gym.Env):
     def __init__(self, df, knowledge=None):
         super().__init__()
-        self.df = df.reset_index(drop=True)
+        self.df        = df.reset_index(drop=True)
         self.knowledge = knowledge
         self.current_step = 60
 
-        # Last balance CSV se padho — reset nahi hoga!
+        # Balance: CSV se restore karo
         log_file = 'sp_trades_log.csv'
         try:
             if os.path.exists(log_file):
@@ -92,17 +92,18 @@ class SPTradingEnv(gym.Env):
             self.balance = 10000.0
             self.initial_balance = 10000.0
 
-        self.position = 0
-        self.entry_price = 0.0
-        self.stop_loss = 0.0
-        self.target = 0.0
-        self.trailing_sl = 0.0
-        self.hold_count = 0
-        self.cooldown = 0
-        self.recent_trades = []
-        self.max_trades_per_session = 3   # FIX: max 3 trades per session
+        self.position     = 0
+        self.entry_price  = 0.0
+        self.stop_loss    = 0.0
+        self.trailing_sl  = 0.0
+        self.initial_sl_distance = 0.0   # tiered trailing ke liye
+        self.position_size = 0.0         # 0.5% capital risk pe based
+
+        self.hold_count   = 0
+        self.cooldown     = 0            # CHANGE: 5 → 2
         self.total_trades = 0
         self.winning_trades = 0
+        self.max_trades_per_session = 5  # CHANGE: 3 → 5
 
         self.action_space = spaces.Discrete(4)
         self.observation_space = spaces.Box(
@@ -110,13 +111,12 @@ class SPTradingEnv(gym.Env):
         )
 
     def _get_obs(self):
-        window = self.df[['open', 'high', 'low', 'close', 'volume']].values
+        window       = self.df[['open', 'high', 'low', 'close', 'volume']].values
         candles_ohlc = self.df[['open', 'high', 'low', 'close']].values
 
-        candles_20 = candles_ohlc[self.current_step-20:self.current_step]
-        normalized = (candles_20 - candles_20.mean(axis=0)) / (candles_20.std(axis=0) + 1e-8)
-        ohlc_flat = normalized.flatten()
-
+        candles_20  = candles_ohlc[self.current_step-20:self.current_step]
+        normalized  = (candles_20 - candles_20.mean(axis=0)) / (candles_20.std(axis=0) + 1e-8)
+        ohlc_flat   = normalized.flatten()
         candle_feats = np.array(get_candle_features(candles_20), dtype=np.float32)
 
         current_price = candles_ohlc[self.current_step-1, 3]
@@ -140,14 +140,13 @@ class SPTradingEnv(gym.Env):
 
         market_structure = get_market_structure(self.df, self.current_step)
 
-        closes = candles_ohlc[self.current_step-10:self.current_step, 3]
-        mom_3  = (closes[-1] - closes[-3])  / (closes[-3]  + 1e-8)
-        mom_5  = (closes[-1] - closes[-5])  / (closes[-5]  + 1e-8)
-        mom_10 = (closes[-1] - closes[-10]) / (closes[-10] + 1e-8)
-
+        closes  = candles_ohlc[self.current_step-10:self.current_step, 3]
+        mom_3   = (closes[-1] - closes[-3])  / (closes[-3]  + 1e-8)
+        mom_5   = (closes[-1] - closes[-5])  / (closes[-5]  + 1e-8)
+        mom_10  = (closes[-1] - closes[-10]) / (closes[-10] + 1e-8)
         volatility = closes.std() / (current_price + 1e-8)
 
-        vol = window[self.current_step-10:self.current_step, 4]
+        vol      = window[self.current_step-10:self.current_step, 4]
         vol_mean = vol.mean() + 1e-8
 
         win_rate = self.winning_trades / (self.total_trades + 1e-8)
@@ -164,19 +163,20 @@ class SPTradingEnv(gym.Env):
             win_rate,
         ], dtype=np.float32)
 
-        if self.position != 0 and self.stop_loss > 0:
-            sl_dist  = abs(current_price - self.stop_loss)  / (current_price + 1e-8)
-            tgt_dist = abs(self.target - current_price)     / (current_price + 1e-8)
-            rr_ratio = tgt_dist / (sl_dist + 1e-8)
+        # Trade features: SL distance, locked profit ratio, current R, current pnl
+        if self.position != 0 and self.initial_sl_distance > 0:
+            sl_dist     = abs(current_price - self.trailing_sl) / (current_price + 1e-8)
             if self.position == 1:
                 current_pnl = (current_price - self.entry_price) / self.entry_price
             else:
                 current_pnl = (self.entry_price - current_price) / self.entry_price
+            current_r   = (abs(current_price - self.entry_price)) / (self.initial_sl_distance + 1e-8)
+            locked_pnl  = (abs(self.trailing_sl - self.entry_price)) / (self.initial_sl_distance + 1e-8)
         else:
-            sl_dist = tgt_dist = rr_ratio = current_pnl = 0.0
+            sl_dist = current_pnl = current_r = locked_pnl = 0.0
 
         trade_feats = np.array([
-            sl_dist, tgt_dist, rr_ratio, current_pnl
+            sl_dist, locked_pnl, current_r, current_pnl
         ], dtype=np.float32)
 
         obs = np.concatenate([
@@ -188,92 +188,126 @@ class SPTradingEnv(gym.Env):
             obs = np.pad(obs, (0, 185 - len(obs)))
         return obs[:185]
 
+    def _calc_position_size(self, entry_price, sl_price):
+        """
+        Risk = capital ka 0.5%
+        position_size = risk / sl_distance
+        Matlab: agar SL hit hua toh sirf 0.5% balance jayega
+        """
+        sl_distance_pct = abs(entry_price - sl_price) / entry_price
+        if sl_distance_pct <= 0:
+            return 0.0
+        position_size = 0.005 / sl_distance_pct  # 0.5% risk / SL%
+        return min(position_size, 5.0)  # max 5x leverage cap
+
+    def _update_trailing_sl_long(self, current_price):
+        """
+        Tiered trailing for LONG:
+        - Price >= entry + 2R  →  SL to breakeven (entry)
+        - Price >= entry + 4R  →  SL to entry + 2R (lock 1:2)
+        """
+        r1 = self.initial_sl_distance
+        if current_price >= self.entry_price + 4 * r1:
+            new_trail = self.entry_price + 2 * r1
+        elif current_price >= self.entry_price + 2 * r1:
+            new_trail = self.entry_price
+        else:
+            new_trail = self.trailing_sl  # original SL, koi change nahi
+        self.trailing_sl = max(self.trailing_sl, new_trail)
+
+    def _update_trailing_sl_short(self, current_price):
+        """
+        Tiered trailing for SHORT:
+        - Price <= entry - 2R  →  SL to breakeven (entry)
+        - Price <= entry - 4R  →  SL to entry - 2R (lock 1:2)
+        """
+        r1 = self.initial_sl_distance
+        if current_price <= self.entry_price - 4 * r1:
+            new_trail = self.entry_price - 2 * r1
+        elif current_price <= self.entry_price - 2 * r1:
+            new_trail = self.entry_price
+        else:
+            new_trail = self.trailing_sl  # original SL
+        self.trailing_sl = min(self.trailing_sl, new_trail)
+
     def step(self, action):
         current_price = self.df['close'].iloc[self.current_step]
-        reward = 0
-        forced_close = False
+        reward        = 0
+        forced_close  = False
 
+        # Cooldown check
         if self.cooldown > 0:
             self.cooldown -= 1
             action = 0
 
-        self.recent_trades.append(1 if action in [1, 2] else 0)
-        if len(self.recent_trades) > 5:
-            self.recent_trades.pop(0)
-
-        # FIX: overtrade threshold 3→2, plus session trade limit
-        overtrade = sum(self.recent_trades) >= 2 or self.total_trades >= self.max_trades_per_session
+        # CHANGE: overtrade = sirf daily limit
+        # (rapid fire check hataya — max_trades limit hi kaafi hai)
+        at_daily_limit = (self.total_trades >= self.max_trades_per_session)
 
         market_str = get_market_structure(self.df, self.current_step)
 
+        # ---- LONG ENTRY ----
         if action == 1 and self.position == 0:
-            if overtrade:
+            if at_daily_limit:
                 reward = -0.05
             else:
-                # FIX: 0.5% SL — swing low ya 0.5%, jo bhi price ke closer ho
                 swing_sl    = find_swing_low(self.df, self.current_step)
-                max_sl      = current_price * 0.995          # 0.5% below entry
-                sl          = max(swing_sl, max_sl)           # closer SL use karo
-                sl_distance = current_price - sl
+                sl_distance = current_price - swing_sl
                 trend_bonus = 0.01 if market_str == 1.0 else -0.01
 
-                # FIX: reject if SL distance > 0.5% (0.05 → 0.005)
-                if sl_distance <= 0 or sl_distance > current_price * 0.005:
+                if sl_distance <= 0:
                     reward = -0.01
                 else:
-                    target = current_price + (sl_distance * 3)   # 3:1 RR
-                    self.position = 1
-                    self.entry_price = current_price
-                    self.stop_loss = sl
-                    self.target = target
-                    self.trailing_sl = sl
-                    self.hold_count = 0
-                    self.total_trades += 1
+                    pos_size = self._calc_position_size(current_price, swing_sl)
+                    self.position           = 1
+                    self.entry_price        = current_price
+                    self.stop_loss          = swing_sl
+                    self.trailing_sl        = swing_sl
+                    self.initial_sl_distance = sl_distance
+                    self.position_size      = pos_size
+                    self.hold_count         = 0
+                    self.total_trades      += 1
                     reward = trend_bonus
 
+        # ---- SHORT ENTRY ----
         elif action == 2 and self.position == 0:
-            if overtrade:
+            if at_daily_limit:
                 reward = -0.05
             else:
-                # FIX: 0.5% SL — swing high ya 0.5%, jo bhi price ke closer ho
                 swing_sl    = find_swing_high(self.df, self.current_step)
-                max_sl      = current_price * 1.005          # 0.5% above entry
-                sl          = min(swing_sl, max_sl)           # closer SL use karo
-                sl_distance = sl - current_price
+                sl_distance = swing_sl - current_price
                 trend_bonus = 0.01 if market_str == -1.0 else -0.01
 
-                # FIX: reject if SL distance > 0.5% (0.05 → 0.005)
-                if sl_distance <= 0 or sl_distance > current_price * 0.005:
+                if sl_distance <= 0:
                     reward = -0.01
                 else:
-                    target = current_price - (sl_distance * 3)   # 3:1 RR
-                    self.position = -1
-                    self.entry_price = current_price
-                    self.stop_loss = sl
-                    self.target = target
-                    self.trailing_sl = sl
-                    self.hold_count = 0
-                    self.total_trades += 1
+                    pos_size = self._calc_position_size(current_price, swing_sl)
+                    self.position           = -1
+                    self.entry_price        = current_price
+                    self.stop_loss          = swing_sl
+                    self.trailing_sl        = swing_sl
+                    self.initial_sl_distance = sl_distance
+                    self.position_size      = pos_size
+                    self.hold_count         = 0
+                    self.total_trades      += 1
                     reward = trend_bonus
 
+        # ---- POSITION MANAGEMENT ----
         elif self.position != 0:
             self.hold_count += 1
 
             if self.position == 1:
-                if current_price > self.entry_price:
-                    new_trail = current_price - (self.entry_price - self.stop_loss)
-                    self.trailing_sl = max(self.trailing_sl, new_trail)
+                # Tiered trailing update
+                self._update_trailing_sl_long(current_price)
 
                 if current_price <= self.trailing_sl:
-                    profit = (current_price - self.entry_price) / self.entry_price
-                    reward = profit * 150
-                    self.balance *= (1 + profit)
-                    forced_close = True
-                elif current_price >= self.target:
-                    profit = (current_price - self.entry_price) / self.entry_price
-                    reward = profit * 200
-                    self.balance *= (1 + profit)
-                    self.winning_trades += 1
+                    # SL / trailing SL hit
+                    profit_pct    = (current_price - self.entry_price) / self.entry_price
+                    profit_amount = self.position_size * profit_pct
+                    reward        = profit_amount * 150
+                    self.balance *= (1 + profit_amount)
+                    if profit_amount > 0:
+                        self.winning_trades += 1
                     forced_close = True
                 elif action == 0 and current_price > self.entry_price:
                     reward = 0.005
@@ -281,67 +315,64 @@ class SPTradingEnv(gym.Env):
                     reward = -0.005
 
             elif self.position == -1:
-                if current_price < self.entry_price:
-                    new_trail = current_price + (self.stop_loss - self.entry_price)
-                    self.trailing_sl = min(self.trailing_sl, new_trail)
+                # Tiered trailing update
+                self._update_trailing_sl_short(current_price)
 
                 if current_price >= self.trailing_sl:
-                    profit = (self.entry_price - current_price) / self.entry_price
-                    reward = profit * 150
-                    self.balance *= (1 + profit)
-                    forced_close = True
-                elif current_price <= self.target:
-                    profit = (self.entry_price - current_price) / self.entry_price
-                    reward = profit * 200
-                    self.balance *= (1 + profit)
-                    self.winning_trades += 1
+                    # SL / trailing SL hit
+                    profit_pct    = (self.entry_price - current_price) / self.entry_price
+                    profit_amount = self.position_size * profit_pct
+                    reward        = profit_amount * 150
+                    self.balance *= (1 + profit_amount)
+                    if profit_amount > 0:
+                        self.winning_trades += 1
                     forced_close = True
                 elif action == 0 and current_price < self.entry_price:
                     reward = 0.005
                 elif action == 0 and current_price > self.entry_price:
                     reward = -0.005
 
+            # Manual close (action == 3)
             if action == 3 and not forced_close:
                 if self.position == 1:
-                    profit = (current_price - self.entry_price) / self.entry_price
+                    profit_pct = (current_price - self.entry_price) / self.entry_price
                 else:
-                    profit = (self.entry_price - current_price) / self.entry_price
-                if profit > 0:
-                    reward = profit * 80
-                else:
-                    reward = profit * 100
-                self.balance *= (1 + profit)
-                if profit > 0:
+                    profit_pct = (self.entry_price - current_price) / self.entry_price
+                profit_amount = self.position_size * profit_pct
+                reward        = profit_amount * (80 if profit_pct > 0 else 100)
+                self.balance *= (1 + profit_amount)
+                if profit_pct > 0:
                     self.winning_trades += 1
                 forced_close = True
 
             if forced_close:
-                self.position = 0
-                self.entry_price = 0.0
-                self.stop_loss = 0.0
-                self.target = 0.0
-                self.trailing_sl = 0.0
-                self.hold_count = 0
-                self.cooldown = 5   # FIX: cooldown 3 → 5
+                self.position            = 0
+                self.entry_price         = 0.0
+                self.stop_loss           = 0.0
+                self.trailing_sl         = 0.0
+                self.initial_sl_distance = 0.0
+                self.position_size       = 0.0
+                self.hold_count          = 0
+                self.cooldown            = 2   # CHANGE: 5 → 2
 
         self.current_step += 1
         done = self.current_step >= len(self.df) - 1
         return self._get_obs(), reward, done, False, {}
 
     def reset(self, seed=None):
-        self.current_step = 60
-        self.balance = self.initial_balance
-        self.position = 0
-        self.entry_price = 0.0
-        self.stop_loss = 0.0
-        self.target = 0.0
-        self.trailing_sl = 0.0
-        self.hold_count = 0
-        self.cooldown = 0
-        self.recent_trades = []
-        self.max_trades_per_session = 3   # FIX: reset ke time bhi reset
-        self.total_trades = 0
-        self.winning_trades = 0
+        self.current_step        = 60
+        self.balance             = self.initial_balance
+        self.position            = 0
+        self.entry_price         = 0.0
+        self.stop_loss           = 0.0
+        self.trailing_sl         = 0.0
+        self.initial_sl_distance = 0.0
+        self.position_size       = 0.0
+        self.hold_count          = 0
+        self.cooldown            = 0
+        self.total_trades        = 0
+        self.winning_trades      = 0
+        self.max_trades_per_session = 5   # CHANGE: 3 → 5
         return self._get_obs(), {}
 
 # =====================
@@ -349,7 +380,7 @@ class SPTradingEnv(gym.Env):
 # =====================
 now_ist = datetime.now(IST).strftime("%Y-%m-%d %H:%M")
 print(f"\n{'='*50}")
-print(f"SUBHASHISH PANI RL AGENT")
+print(f"SUBHASHISH PANI RL AGENT v2")
 print(f"Time: {now_ist}")
 print(f"{'='*50}")
 
@@ -358,7 +389,7 @@ knowledge = load_knowledge()
 print("\n1. BTC data fetch ho raha hai...")
 try:
     exchange = ccxt.kraken()
-    ohlcv = exchange.fetch_ohlcv('BTC/USD', timeframe='1h', limit=500)
+    ohlcv    = exchange.fetch_ohlcv('BTC/USD', timeframe='1h', limit=500)
     print("   Kraken se data mila!")
 except Exception as e:
     print(f"   Error: {e}")
@@ -369,9 +400,9 @@ new_df['timestamp'] = pd.to_datetime(new_df['timestamp'], unit='ms')
 
 data_file = 'sp_btc_data.csv'
 if os.path.exists(data_file):
-    old_df = pd.read_csv(data_file)
-    combined_df = pd.concat([old_df, new_df], ignore_index=True)
-    combined_df = combined_df.drop_duplicates('timestamp').reset_index(drop=True)
+    old_df       = pd.read_csv(data_file)
+    combined_df  = pd.concat([old_df, new_df], ignore_index=True)
+    combined_df  = combined_df.drop_duplicates('timestamp').reset_index(drop=True)
     combined_df.to_csv(data_file, index=False)
     train_df = combined_df
 else:
@@ -381,9 +412,9 @@ else:
 print(f"   Total candles: {len(train_df)}")
 
 print("\n2. Training ho raha hai...")
-train_env = SPTradingEnv(train_df, knowledge)
-
+train_env  = SPTradingEnv(train_df, knowledge)
 model_file = 'sp_rl_model'
+
 if os.path.exists(f'{model_file}.zip'):
     model = PPO.load(model_file, env=train_env)
     print("   Purana model load — aage seekhega!")
@@ -407,27 +438,30 @@ live_df['timestamp'] = pd.to_datetime(live_df['timestamp'], unit='ms')
 live_df = live_df.reset_index(drop=True)
 
 live_env = SPTradingEnv(live_df, knowledge)
-obs, _ = live_env.reset()
+obs, _   = live_env.reset()
 
-trades_today = []
-prev_position = 0
-prev_sl = prev_target = 0.0
+trades_today   = []
+prev_position  = 0
+prev_sl        = 0.0
+prev_entry     = 0.0
 
 for _ in range(len(live_df) - 61):
     action, _ = model.predict(obs)
     prev_position = live_env.position
-    prev_sl = live_env.stop_loss
-    prev_target = live_env.target
+    prev_sl       = live_env.stop_loss
+    prev_trail_sl = live_env.trailing_sl
+    prev_entry    = live_env.entry_price
     obs, reward, done, _, _ = live_env.step(action)
     current_price = live_df['close'].iloc[live_env.current_step-1]
-    now_ist = datetime.now(IST).strftime("%Y-%m-%d %H:%M")
+    now_ist       = datetime.now(IST).strftime("%Y-%m-%d %H:%M")
 
     if action == 1 and prev_position == 0 and live_env.position == 1:
         trades_today.append({
             'date': now_ist, 'action': 'LONG',
             'price': current_price,
             'sl': round(live_env.stop_loss, 1),
-            'target': round(live_env.target, 1),
+            'trail_sl': round(live_env.trailing_sl, 1),
+            'pos_size': round(live_env.position_size, 3),
             'profit_pct': 0, 'balance': round(live_env.balance, 2),
             'result': 'OPEN'
         })
@@ -436,7 +470,8 @@ for _ in range(len(live_df) - 61):
             'date': now_ist, 'action': 'SHORT',
             'price': current_price,
             'sl': round(live_env.stop_loss, 1),
-            'target': round(live_env.target, 1),
+            'trail_sl': round(live_env.trailing_sl, 1),
+            'pos_size': round(live_env.position_size, 3),
             'profit_pct': 0, 'balance': round(live_env.balance, 2),
             'result': 'OPEN'
         })
@@ -446,7 +481,8 @@ for _ in range(len(live_df) - 61):
             'date': now_ist, 'action': close_label,
             'price': current_price,
             'sl': round(prev_sl, 1),
-            'target': round(prev_target, 1),
+            'trail_sl': round(prev_trail_sl, 1),
+            'pos_size': 0,
             'profit_pct': round(reward, 4),
             'balance': round(live_env.balance, 2),
             'result': 'WIN' if reward > 0 else 'LOSS'
@@ -454,10 +490,13 @@ for _ in range(len(live_df) - 61):
     if done:
         break
 
-log_file = 'sp_trades_log.csv'
+log_file   = 'sp_trades_log.csv'
 file_exists = os.path.exists(log_file)
 with open(log_file, 'a', newline='') as f:
-    writer = csv.DictWriter(f, fieldnames=['date', 'action', 'price', 'sl', 'target', 'profit_pct', 'balance', 'result'])
+    writer = csv.DictWriter(f, fieldnames=[
+        'date', 'action', 'price', 'sl', 'trail_sl', 'pos_size',
+        'profit_pct', 'balance', 'result'
+    ])
     if not file_exists:
         writer.writeheader()
     writer.writerows(trades_today)
