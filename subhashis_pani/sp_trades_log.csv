@@ -1,1 +1,3 @@
 date,action,price,sl,trail_sl,pos_size,profit_pct,balance,result
+2026-05-14 18:49,LONG,79680.5,78720.9,78720.9,0.415,0,10000.0,OPEN
+2026-05-14 18:49,LONG CLOSE,79396.2,78720.9,78720.9,0,-0.1481,9985.19,LOSS
