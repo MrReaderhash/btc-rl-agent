@@ -41,7 +41,7 @@ def candle_time_ist(live_df, step):
     return pd.Timestamp(ts).tz_localize('UTC').tz_convert(IST).strftime("%Y-%m-%d %H:%M")
 
 # =====================
-# KNOWLEDGE BASE LOAD
+# KNOWLEDGE BASE
 # =====================
 def load_knowledge():
     if os.path.exists('knowledge_base.json'):
@@ -55,7 +55,7 @@ def load_knowledge():
     return None
 
 # =====================
-# MARKET STRUCTURE
+# MARKET HELPERS
 # =====================
 def get_market_structure(df, current_step):
     if current_step < 20:
@@ -66,6 +66,18 @@ def get_market_structure(df, current_step):
         return 1.0
     elif highs[-10:].max() < highs[:10].max() and lows[-10:].min() < lows[:10].min():
         return -1.0
+    return 0.0
+
+def get_momentum_signal(df, current_step):
+    if current_step < 5:
+        return 0
+    closes  = df['close'].iloc[current_step-5:current_step].values
+    bearish = sum(1 for i in range(1, 5) if closes[i] < closes[i-1])
+    bullish = sum(1 for i in range(1, 5) if closes[i] > closes[i-1])
+    if bearish >= 3:
+        return -1.0
+    elif bullish >= 3:
+        return 1.0
     return 0.0
 
 def find_swing_low(df, current_step, lookback=10):
@@ -85,25 +97,6 @@ def get_candle_features(candles):
         direction   = 1.0 if body > 0 else -1.0
         features.extend([body_size, upper_wick, lower_wick, direction])
     return features
-
-# =====================
-# BEARISH / BULLISH SIGNAL
-# =====================
-def get_momentum_signal(df, current_step):
-    """
-    Last 5 candles ka momentum check karo.
-    +1 = bullish, -1 = bearish, 0 = neutral
-    """
-    if current_step < 5:
-        return 0
-    closes = df['close'].iloc[current_step-5:current_step].values
-    bearish_candles = sum(1 for i in range(1, 5) if closes[i] < closes[i-1])
-    bullish_candles = sum(1 for i in range(1, 5) if closes[i] > closes[i-1])
-    if bearish_candles >= 3:
-        return -1   # clear bearish momentum
-    elif bullish_candles >= 3:
-        return 1    # clear bullish momentum
-    return 0
 
 # =====================
 # ENVIRONMENT
@@ -195,7 +188,7 @@ class SPTradingEnv(gym.Env):
 
         extra_feats = np.array([
             market_structure,
-            momentum_signal,      # NEW: bearish/bullish signal
+            momentum_signal,
             mom_3, mom_5, mom_10,
             volatility,
             vol[-1] / vol_mean,
@@ -252,9 +245,7 @@ class SPTradingEnv(gym.Env):
         self.trailing_sl = min(self.trailing_sl, new_trail)
 
     def step(self, action):
-        # FIX 1: action ko int mein convert karo — numpy comparison issue fix
-        action = int(action)
-
+        action        = int(action)
         current_price = self.df['close'].iloc[self.current_step]
         reward        = 0
         forced_close  = False
@@ -267,15 +258,13 @@ class SPTradingEnv(gym.Env):
         market_str      = get_market_structure(self.df, self.current_step)
         momentum_signal = get_momentum_signal(self.df, self.current_step)
 
-        # ---- LONG ENTRY ----
         if action == 1 and self.position == 0:
             if at_daily_limit:
                 reward = -0.05
             else:
                 swing_sl    = find_swing_low(self.df, self.current_step)
                 sl_distance = current_price - swing_sl
-                # FIX 3: Long ke liye bullish momentum bonus
-                trend_bonus = 0.02 if (market_str == 1.0 or momentum_signal == 1) else 0.0
+                trend_bonus = 0.02 if (market_str == 1.0 or momentum_signal == 1.0) else 0.0
                 if sl_distance <= 0:
                     reward = -0.01
                 else:
@@ -290,15 +279,13 @@ class SPTradingEnv(gym.Env):
                     self.candles_since_trade = 0
                     reward = trend_bonus
 
-        # ---- SHORT ENTRY ----
         elif action == 2 and self.position == 0:
             if at_daily_limit:
                 reward = -0.05
             else:
                 swing_sl    = find_swing_high(self.df, self.current_step)
                 sl_distance = swing_sl - current_price
-                # FIX 3: Short ke liye bearish momentum bonus — SAME reward as long
-                trend_bonus = 0.02 if (market_str == -1.0 or momentum_signal == -1) else 0.0
+                trend_bonus = 0.02 if (market_str == -1.0 or momentum_signal == -1.0) else 0.0
                 if sl_distance <= 0:
                     reward = -0.01
                 else:
@@ -313,7 +300,6 @@ class SPTradingEnv(gym.Env):
                     self.candles_since_trade = 0
                     reward = trend_bonus
 
-        # ---- POSITION MANAGEMENT ----
         elif self.position != 0:
             self.hold_count += 1
 
@@ -368,11 +354,10 @@ class SPTradingEnv(gym.Env):
                 self.cooldown            = 2
                 self.candles_since_trade = 0
 
-        # FIX 2: Idle penalty — 10 candle ke baad zyada aggressive
         else:
             self.candles_since_trade += 1
             if self.candles_since_trade > 10 and not at_daily_limit:
-                reward = -0.005   # v4 se zyada penalty
+                reward = -0.005
 
         self.current_step += 1
         done = self.current_step >= len(self.df) - 1
@@ -436,11 +421,11 @@ def load_open_position(env):
 # =====================
 now_ist = datetime.now(IST).strftime("%Y-%m-%d %H:%M")
 print(f"\n{'='*50}")
-print(f"SUBHASHISH PANI RL AGENT v5")
+print(f"SUBHASHISH PANI RL AGENT v6")
 print(f"Time: {now_ist}")
 print(f"{'='*50}")
 
-send_telegram(f"🤖 SP Agent v5 Started\n⏰ {now_ist}")
+send_telegram(f"🤖 SP Agent v6 Started\n⏰ {now_ist}")
 
 knowledge = load_knowledge()
 
@@ -469,21 +454,22 @@ else:
 
 print(f"   Total candles: {len(train_df)}")
 
-print("\n2. Training ho raha hai...")
+# =====================
+# TRAINING
+# Purana model delete karo — fresh start zaroori hai
+# kyunki v5/v6 mein observation structure badli hai
+# =====================
+print("\n2. Training ho raha hai (200k steps — thoda time lagega)...")
 train_env  = SPTradingEnv(train_df, knowledge)
 model_file = 'sp_rl_model'
 
 if os.path.exists(f'{model_file}.zip'):
-    model = PPO.load(model_file, env=train_env)
-    # FIX 2: Loaded model mein bhi entropy force karo — zyada explore karega
-    model.ent_coef = 0.02
-    print("   Purana model load — entropy boost diya!")
-else:
-    model = PPO("MlpPolicy", train_env, verbose=0,
-                n_steps=2048, batch_size=64, ent_coef=0.02)
-    print("   Naya model bana!")
+    os.remove(f'{model_file}.zip')
+    print("   Purana model delete kiya — fresh start!")
 
-model.learn(total_timesteps=50000)
+model = PPO("MlpPolicy", train_env, verbose=0,
+            n_steps=2048, batch_size=64, ent_coef=0.02)
+model.learn(total_timesteps=200000)
 model.save(model_file)
 print("   Model saved!")
 
@@ -501,7 +487,6 @@ live_df = live_df.reset_index(drop=True)
 live_env = SPTradingEnv(live_df, knowledge)
 obs, _   = live_env.reset()
 
-# Open position restore
 position_restored = load_open_position(live_env)
 if position_restored:
     direction = "LONG 🟢" if live_env.position == 1 else "SHORT 🔴"
@@ -519,8 +504,8 @@ prev_sl       = 0.0
 prev_trail_sl = 0.0
 
 for _ in range(len(live_df) - 61):
-    action, _     = model.predict(obs)
-    action        = int(action)   # FIX 1: numpy → int, comparison guaranteed sahi hogi
+    action, _ = model.predict(obs)
+    action    = int(action)
 
     prev_position = live_env.position
     prev_sl       = live_env.stop_loss
@@ -530,9 +515,8 @@ for _ in range(len(live_df) - 61):
     current_price = live_df['close'].iloc[live_env.current_step-1]
     ctime         = candle_time_ist(live_df, live_env.current_step-1)
 
-    # LONG entry
     if action == 1 and prev_position == 0 and live_env.position == 1:
-        print(f"   LONG @ {ctime} | Price: {current_price:.1f}")
+        print(f"   🟢 LONG @ {ctime} | Price: {current_price:.1f} | SL: {live_env.stop_loss:.1f}")
         trades_today.append({
             'date': ctime, 'action': 'LONG',
             'price': current_price,
@@ -552,9 +536,8 @@ for _ in range(len(live_df) - 61):
             f"💼 Balance: ${live_env.balance:,.2f}"
         )
 
-    # SHORT entry
     elif action == 2 and prev_position == 0 and live_env.position == -1:
-        print(f"   SHORT @ {ctime} | Price: {current_price:.1f}")
+        print(f"   🔴 SHORT @ {ctime} | Price: {current_price:.1f} | SL: {live_env.stop_loss:.1f}")
         trades_today.append({
             'date': ctime, 'action': 'SHORT',
             'price': current_price,
@@ -574,11 +557,10 @@ for _ in range(len(live_df) - 61):
             f"💼 Balance: ${live_env.balance:,.2f}"
         )
 
-    # Trade close
     elif prev_position != 0 and live_env.position == 0:
         close_label = 'LONG CLOSE' if prev_position == 1 else 'SHORT CLOSE'
         result      = 'WIN' if reward > 0 else 'LOSS'
-        print(f"   {close_label} @ {ctime} | Price: {current_price:.1f} | {result}")
+        print(f"   {'✅' if result=='WIN' else '❌'} {close_label} @ {ctime} | {result} | P&L: {reward:.4f}")
         trades_today.append({
             'date': ctime, 'action': close_label,
             'price': current_price,
@@ -600,7 +582,6 @@ for _ in range(len(live_df) - 61):
     if done:
         break
 
-# Open position save
 if live_env.position != 0:
     save_open_position(live_env)
     direction = "LONG 🟢" if live_env.position == 1 else "SHORT 🔴"
@@ -613,7 +594,6 @@ if live_env.position != 0:
         f"Next session mein continue hogi ✅"
     )
 
-# CSV LOG
 log_file    = 'sp_trades_log.csv'
 file_exists = os.path.exists(log_file)
 with open(log_file, 'a', newline='') as f:
