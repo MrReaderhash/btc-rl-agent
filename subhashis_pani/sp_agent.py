@@ -474,11 +474,19 @@ model.save(model_file)
 print("   Model saved!")
 
 print("\n3. Live paper trading...")
-try:
-    live_ohlcv = exchange.fetch_ohlcv('BTC/USD', timeframe='1h', limit=100)
-except Exception as e:
-    send_telegram(f"❌ Live data fetch failed!\n{e}")
-    raise
+live_ohlcv = None
+for attempt in range(5):
+    try:
+        live_ohlcv = exchange.fetch_ohlcv('BTC/USD', timeframe='1h', limit=100)
+        print(f"   Live data mila! (attempt {attempt+1})")
+        break
+    except Exception as e:
+        print(f"   Attempt {attempt+1} failed: {e}")
+        if attempt == 4:
+            send_telegram(f"❌ Live data fetch failed 5 attempts ke baad!\n{e}")
+            raise
+        import time
+        time.sleep(5)
 
 live_df = pd.DataFrame(live_ohlcv, columns=['timestamp', 'open', 'high', 'low', 'close', 'volume'])
 live_df['timestamp'] = pd.to_datetime(live_df['timestamp'], unit='ms')
