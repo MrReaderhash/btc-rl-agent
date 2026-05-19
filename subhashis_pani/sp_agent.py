@@ -487,14 +487,22 @@ if state['cooldown'] > 0:
     send_telegram(f"⏳ Cooldown active\n⏰ {current_time}\n💰 ${current_price:,.1f}")
     import sys; sys.exit(0)
 
-# Observation + prediction
-obs           = build_obs(df, step, state)
-action_arr, _ = model.predict(obs.reshape(1, -1))
-action        = int(action_arr[0])
-print(f"   RL action: {['HOLD','LONG','SHORT','CLOSE'][action]}")
-
 market_str = get_market_structure(df, step)
 at_limit   = state['total_trades'] >= 5
+
+# Rule-based entry — market structure se
+if state['position'] == 0 and not at_limit:
+    if market_str == 1.0:
+        action = 1
+    elif market_str == -1.0:
+        action = 2
+    else:
+        action = 0
+else:
+    action = 0
+
+print(f"   Market : {'BULLISH' if market_str==1.0 else 'BEARISH' if market_str==-1.0 else 'SIDEWAYS'}")
+print(f"   Action : {['HOLD','LONG','SHORT'][action]}")
 
 # ---- EXISTING POSITION CHECK ----
 if state['position'] != 0:
@@ -660,7 +668,7 @@ print(f"   State saved!")
 hour_ist = datetime.now(IST).hour
 if hour_ist in [0, 8, 16]:
     log_file = 'sp_trades_log.csv'
-    if os.path.exists(log_file):
+    if os.path.exists(log_file) and os.path.getsize(log_file) > 0:
         log_df   = pd.read_csv(log_file)
         today    = datetime.now(IST).strftime("%Y-%m-%d")
         today_df = log_df[log_df['date'].str.startswith(today)]
