@@ -15,8 +15,8 @@ IST = timezone(timedelta(hours=5, minutes=30))
 # =====================
 # TELEGRAM CONFIG
 # =====================
-TELEGRAM_TOKEN = "tera_bot_token_yahan"
-CHAT_ID        = "tera_chat_id_yahan"
+TELEGRAM_TOKEN = "8644074664:AAH-pc-pp4FUpEKsyyUb5rEabiU7eDWfC2Q"
+CHAT_ID        = "711544016"
 
 def send_telegram(msg):
     try:
