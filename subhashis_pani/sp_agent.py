@@ -15,8 +15,8 @@ IST = timezone(timedelta(hours=5, minutes=30))
 # =====================
 # TELEGRAM CONFIG
 # =====================
-TELEGRAM_TOKEN = "8644074664:AAH-pc-pp4FUpEKsyyUb5rEabiU7eDWfC2Q"
-CHAT_ID        = "711544016"
+TELEGRAM_TOKEN = "tera_bot_token_yahan"
+CHAT_ID        = "tera_chat_id_yahan"
 
 def send_telegram(msg):
     try:
@@ -25,7 +25,7 @@ def send_telegram(msg):
         if r.status_code != 200:
             print(f"   Telegram error: {r.text}")
     except Exception as e:
-        print(f"   Telegram message error: {e}")
+        print(f"   Telegram error: {e}")
 
 def send_telegram_file(filepath, caption=""):
     try:
@@ -36,9 +36,8 @@ def send_telegram_file(filepath, caption=""):
     except Exception as e:
         print(f"   Telegram file error: {e}")
 
-def candle_time_ist(live_df, step):
-    ts = live_df['timestamp'].iloc[step]
-    return pd.Timestamp(ts).tz_localize('UTC').tz_convert(IST).strftime("%Y-%m-%d %H:%M")
+def candle_time_ist(timestamp):
+    return pd.Timestamp(timestamp).tz_localize('UTC').tz_convert(IST).strftime("%Y-%m-%d %H:%M")
 
 # =====================
 # KNOWLEDGE BASE
@@ -55,29 +54,22 @@ def load_knowledge():
     return None
 
 # =====================
-# MARKET HELPERS
+# MARKET STRUCTURE
+# (purana code — same rakha)
 # =====================
 def get_market_structure(df, current_step):
     if current_step < 20:
         return 0
     highs = df['high'].iloc[current_step-20:current_step].values
     lows  = df['low'].iloc[current_step-20:current_step].values
-    if highs[-10:].max() > highs[:10].max() and lows[-10:].min() > lows[:10].min():
+    recent_highs = highs[-10:]
+    recent_lows  = lows[-10:]
+    older_highs  = highs[:10]
+    older_lows   = lows[:10]
+    if recent_highs.max() > older_highs.max() and recent_lows.min() > older_lows.min():
         return 1.0
-    elif highs[-10:].max() < highs[:10].max() and lows[-10:].min() < lows[:10].min():
+    elif recent_highs.max() < older_highs.max() and recent_lows.min() < older_lows.min():
         return -1.0
-    return 0.0
-
-def get_momentum_signal(df, current_step):
-    if current_step < 5:
-        return 0
-    closes  = df['close'].iloc[current_step-5:current_step].values
-    bearish = sum(1 for i in range(1, 5) if closes[i] < closes[i-1])
-    bullish = sum(1 for i in range(1, 5) if closes[i] > closes[i-1])
-    if bearish >= 3:
-        return -1.0
-    elif bullish >= 3:
-        return 1.0
     return 0.0
 
 def find_swing_low(df, current_step, lookback=10):
@@ -99,150 +91,174 @@ def get_candle_features(candles):
     return features
 
 # =====================
-# ENVIRONMENT
+# OBSERVATION BUILDER
+# Purana structure — old model ke saath compatible
+# 181 features → pad to 185
+# =====================
+def build_obs(df, step, state):
+    window       = df[['open', 'high', 'low', 'close', 'volume']].values
+    candles_ohlc = df[['open', 'high', 'low', 'close']].values
+
+    candles_20   = candles_ohlc[step-20:step]
+    normalized   = (candles_20 - candles_20.mean(axis=0)) / (candles_20.std(axis=0) + 1e-8)
+    ohlc_flat    = normalized.flatten()                                    # 80
+    candle_feats = np.array(get_candle_features(candles_20), dtype=np.float32)  # 80
+
+    current_price = candles_ohlc[step-1, 3]
+
+    high_10 = candles_ohlc[step-10:step, 1].max()
+    low_10  = candles_ohlc[step-10:step, 2].min()
+    high_20 = candles_ohlc[step-20:step, 1].max()
+    low_20  = candles_ohlc[step-20:step, 2].min()
+    high_50 = candles_ohlc[step-50:step, 1].max()
+    low_50  = candles_ohlc[step-50:step, 2].min()
+    price_range = high_50 - low_50 + 1e-8
+
+    breakout_feats = np.array([
+        (current_price - high_10) / price_range,
+        (current_price - low_10)  / price_range,
+        (current_price - high_20) / price_range,
+        (current_price - low_20)  / price_range,
+        (current_price - high_50) / price_range,
+        (current_price - low_50)  / price_range,
+    ], dtype=np.float32)  # 6
+
+    market_structure = get_market_structure(df, step)
+
+    closes     = candles_ohlc[step-10:step, 3]
+    mom_3      = (closes[-1] - closes[-3])  / (closes[-3]  + 1e-8)
+    mom_5      = (closes[-1] - closes[-5])  / (closes[-5]  + 1e-8)
+    mom_10     = (closes[-1] - closes[-10]) / (closes[-10] + 1e-8)
+    volatility = closes.std() / (current_price + 1e-8)
+
+    vol      = window[step-10:step, 4]
+    vol_mean = vol.mean() + 1e-8
+    win_rate = state['winning_trades'] / (state['total_trades'] + 1e-8)
+
+    extra_feats = np.array([
+        market_structure,
+        mom_3, mom_5, mom_10,
+        volatility,
+        vol[-1] / vol_mean,
+        vol[-3:].mean() / vol_mean,
+        float(state['position']),
+        float(state['cooldown']) / 5.0,
+        float(state['hold_count']) / 20.0,
+        win_rate,
+    ], dtype=np.float32)  # 11
+
+    # Purana trade_feats — sl_dist, tgt_dist, rr_ratio, current_pnl
+    pos = state['position']
+    sl  = state['stop_loss']
+    tgt = state['target']
+    if pos != 0 and sl > 0:
+        sl_dist     = abs(current_price - sl)  / (current_price + 1e-8)
+        tgt_dist    = abs(tgt - current_price) / (current_price + 1e-8)
+        rr_ratio    = tgt_dist / (sl_dist + 1e-8)
+        current_pnl = (current_price - state['entry_price']) / state['entry_price'] if pos == 1 \
+                      else (state['entry_price'] - current_price) / state['entry_price']
+    else:
+        sl_dist = tgt_dist = rr_ratio = current_pnl = 0.0
+
+    trade_feats = np.array([sl_dist, tgt_dist, rr_ratio, current_pnl], dtype=np.float32)  # 4
+
+    # Total: 80+80+6+11+4 = 181 → pad to 185
+    obs = np.concatenate([
+        ohlc_flat, candle_feats, breakout_feats, extra_feats, trade_feats
+    ]).astype(np.float32)
+
+    if len(obs) < 185:
+        obs = np.pad(obs, (0, 185 - len(obs)))
+    return obs[:185]
+
+# =====================
+# STATE: SAVE / LOAD
+# =====================
+STATE_FILE = 'sp_state.json'
+
+def load_state():
+    today_ist = datetime.now(IST).strftime("%Y-%m-%d")
+    if os.path.exists(STATE_FILE):
+        with open(STATE_FILE, 'r') as f:
+            state = json.load(f)
+        if state.get('last_date', '') != today_ist:
+            print(f"   Naya din! Trade count reset.")
+            state['total_trades'] = 0
+            state['last_date']    = today_ist
+        return state
+    return {
+        'balance':       10000.0,
+        'position':      0,
+        'entry_price':   0.0,
+        'stop_loss':     0.0,
+        'target':        0.0,
+        'trailing_sl':   0.0,
+        'hold_count':    0,
+        'cooldown':      0,
+        'total_trades':  0,
+        'winning_trades':0,
+        'last_date':     today_ist
+    }
+
+def save_state(state):
+    with open(STATE_FILE, 'w') as f:
+        json.dump(state, f, indent=2)
+
+# =====================
+# LOG HELPER
+# =====================
+def log_trade(trade_dict):
+    log_file    = 'sp_trades_log.csv'
+    file_exists = os.path.exists(log_file)
+    with open(log_file, 'a', newline='') as f:
+        writer = csv.DictWriter(f, fieldnames=[
+            'date', 'action', 'price', 'sl', 'target',
+            'profit_pct', 'balance', 'result'
+        ])
+        if not file_exists:
+            writer.writeheader()
+        writer.writerow(trade_dict)
+
+# =====================
+# TRAINING ENV
+# Purana code — bilkul same
 # =====================
 class SPTradingEnv(gym.Env):
     def __init__(self, df, knowledge=None):
         super().__init__()
-        self.df        = df.reset_index(drop=True)
+        self.df = df.reset_index(drop=True)
         self.knowledge = knowledge
         self.current_step = 60
+        self.balance = 10000.0
+        self.initial_balance = 10000.0
+        self.position = 0
+        self.entry_price = 0.0
+        self.stop_loss = 0.0
+        self.target = 0.0
+        self.trailing_sl = 0.0
+        self.hold_count = 0
+        self.cooldown = 0
+        self.recent_trades = []
+        self.total_trades = 0
+        self.winning_trades = 0
 
-        log_file = 'sp_trades_log.csv'
-        try:
-            if os.path.exists(log_file):
-                old_log = pd.read_csv(log_file)
-                if len(old_log) > 0:
-                    last_balance = float(old_log['balance'].iloc[-1])
-                    self.balance = last_balance
-                    self.initial_balance = last_balance
-                    print(f"   Balance restored: ${last_balance:.2f}")
-                else:
-                    self.balance = 10000.0
-                    self.initial_balance = 10000.0
-            else:
-                self.balance = 10000.0
-                self.initial_balance = 10000.0
-        except:
-            self.balance = 10000.0
-            self.initial_balance = 10000.0
-
-        self.position            = 0
-        self.entry_price         = 0.0
-        self.stop_loss           = 0.0
-        self.trailing_sl         = 0.0
-        self.initial_sl_distance = 0.0
-        self.position_size       = 0.0
-        self.hold_count          = 0
-        self.cooldown            = 0
-        self.total_trades        = 0
-        self.winning_trades      = 0
-        self.max_trades_per_session = 5
-        self.candles_since_trade = 0
-
-        self.action_space = spaces.Discrete(4)
+        self.action_space = spaces.Discrete(4)   # Purana — old model compatible
         self.observation_space = spaces.Box(
             low=-np.inf, high=np.inf, shape=(185,), dtype=np.float32
         )
 
     def _get_obs(self):
-        window       = self.df[['open', 'high', 'low', 'close', 'volume']].values
-        candles_ohlc = self.df[['open', 'high', 'low', 'close']].values
-
-        candles_20   = candles_ohlc[self.current_step-20:self.current_step]
-        normalized   = (candles_20 - candles_20.mean(axis=0)) / (candles_20.std(axis=0) + 1e-8)
-        ohlc_flat    = normalized.flatten()
-        candle_feats = np.array(get_candle_features(candles_20), dtype=np.float32)
-
-        current_price = candles_ohlc[self.current_step-1, 3]
-
-        high_10 = candles_ohlc[self.current_step-10:self.current_step, 1].max()
-        low_10  = candles_ohlc[self.current_step-10:self.current_step, 2].min()
-        high_20 = candles_ohlc[self.current_step-20:self.current_step, 1].max()
-        low_20  = candles_ohlc[self.current_step-20:self.current_step, 2].min()
-        high_50 = candles_ohlc[self.current_step-50:self.current_step, 1].max()
-        low_50  = candles_ohlc[self.current_step-50:self.current_step, 2].min()
-        price_range = high_50 - low_50 + 1e-8
-
-        breakout_feats = np.array([
-            (current_price - high_10) / price_range,
-            (current_price - low_10)  / price_range,
-            (current_price - high_20) / price_range,
-            (current_price - low_20)  / price_range,
-            (current_price - high_50) / price_range,
-            (current_price - low_50)  / price_range,
-        ], dtype=np.float32)
-
-        market_structure = get_market_structure(self.df, self.current_step)
-        momentum_signal  = get_momentum_signal(self.df, self.current_step)
-
-        closes     = candles_ohlc[self.current_step-10:self.current_step, 3]
-        mom_3      = (closes[-1] - closes[-3])  / (closes[-3]  + 1e-8)
-        mom_5      = (closes[-1] - closes[-5])  / (closes[-5]  + 1e-8)
-        mom_10     = (closes[-1] - closes[-10]) / (closes[-10] + 1e-8)
-        volatility = closes.std() / (current_price + 1e-8)
-
-        vol      = window[self.current_step-10:self.current_step, 4]
-        vol_mean = vol.mean() + 1e-8
-        win_rate = self.winning_trades / (self.total_trades + 1e-8)
-
-        extra_feats = np.array([
-            market_structure,
-            momentum_signal,
-            mom_3, mom_5, mom_10,
-            volatility,
-            vol[-1] / vol_mean,
-            vol[-3:].mean() / vol_mean,
-            float(self.position),
-            float(self.cooldown) / 5.0,
-            float(self.hold_count) / 20.0,
-            win_rate,
-        ], dtype=np.float32)
-
-        if self.position != 0 and self.initial_sl_distance > 0:
-            sl_dist     = abs(current_price - self.trailing_sl) / (current_price + 1e-8)
-            current_pnl = (current_price - self.entry_price) / self.entry_price if self.position == 1 \
-                          else (self.entry_price - current_price) / self.entry_price
-            current_r   = abs(current_price - self.entry_price) / (self.initial_sl_distance + 1e-8)
-            locked_pnl  = abs(self.trailing_sl - self.entry_price) / (self.initial_sl_distance + 1e-8)
-        else:
-            sl_dist = current_pnl = current_r = locked_pnl = 0.0
-
-        trade_feats = np.array([sl_dist, locked_pnl, current_r, current_pnl], dtype=np.float32)
-
-        obs = np.concatenate([
-            ohlc_flat, candle_feats, breakout_feats, extra_feats, trade_feats
-        ]).astype(np.float32)
-
-        if len(obs) < 185:
-            obs = np.pad(obs, (0, 185 - len(obs)))
-        return obs[:185]
-
-    def _calc_position_size(self, entry_price, sl_price):
-        sl_pct = abs(entry_price - sl_price) / entry_price
-        if sl_pct <= 0:
-            return 0.0
-        return min(0.005 / sl_pct, 5.0)
-
-    def _update_trailing_sl_long(self, current_price):
-        r1 = self.initial_sl_distance
-        if current_price >= self.entry_price + 4 * r1:
-            new_trail = self.entry_price + 2 * r1
-        elif current_price >= self.entry_price + 2 * r1:
-            new_trail = self.entry_price
-        else:
-            new_trail = self.trailing_sl
-        self.trailing_sl = max(self.trailing_sl, new_trail)
-
-    def _update_trailing_sl_short(self, current_price):
-        r1 = self.initial_sl_distance
-        if current_price <= self.entry_price - 4 * r1:
-            new_trail = self.entry_price - 2 * r1
-        elif current_price <= self.entry_price - 2 * r1:
-            new_trail = self.entry_price
-        else:
-            new_trail = self.trailing_sl
-        self.trailing_sl = min(self.trailing_sl, new_trail)
+        state = {
+            'position':      self.position,
+            'entry_price':   self.entry_price,
+            'stop_loss':     self.stop_loss,
+            'target':        self.target,
+            'hold_count':    self.hold_count,
+            'cooldown':      self.cooldown,
+            'total_trades':  self.total_trades,
+            'winning_trades':self.winning_trades,
+        }
+        return build_obs(self.df, self.current_step, state)
 
     def step(self, action):
         action        = int(action)
@@ -254,64 +270,69 @@ class SPTradingEnv(gym.Env):
             self.cooldown -= 1
             action = 0
 
-        at_daily_limit  = (self.total_trades >= self.max_trades_per_session)
-        market_str      = get_market_structure(self.df, self.current_step)
-        momentum_signal = get_momentum_signal(self.df, self.current_step)
+        self.recent_trades.append(1 if action in [1, 2] else 0)
+        if len(self.recent_trades) > 5:
+            self.recent_trades.pop(0)
+        overtrade  = sum(self.recent_trades) >= 3
+        market_str = get_market_structure(self.df, self.current_step)
 
         if action == 1 and self.position == 0:
-            if at_daily_limit:
+            if overtrade:
                 reward = -0.05
             else:
-                swing_sl    = find_swing_low(self.df, self.current_step)
-                sl_distance = current_price - swing_sl
-                trend_bonus = 0.02 if (market_str == 1.0 or momentum_signal == 1.0) else 0.0
-                if sl_distance <= 0:
+                sl          = find_swing_low(self.df, self.current_step)
+                sl_distance = current_price - sl
+                trend_bonus = 0.01 if market_str == 1.0 else -0.01
+                if sl_distance <= 0 or sl_distance > current_price * 0.05:
                     reward = -0.01
                 else:
-                    self.position            = 1
-                    self.entry_price         = current_price
-                    self.stop_loss           = swing_sl
-                    self.trailing_sl         = swing_sl
-                    self.initial_sl_distance = sl_distance
-                    self.position_size       = self._calc_position_size(current_price, swing_sl)
-                    self.hold_count          = 0
-                    self.total_trades       += 1
-                    self.candles_since_trade = 0
+                    target = current_price + (sl_distance * 3)
+                    self.position    = 1
+                    self.entry_price = current_price
+                    self.stop_loss   = sl
+                    self.target      = target
+                    self.trailing_sl = sl
+                    self.hold_count  = 0
+                    self.total_trades += 1
                     reward = trend_bonus
 
         elif action == 2 and self.position == 0:
-            if at_daily_limit:
+            if overtrade:
                 reward = -0.05
             else:
-                swing_sl    = find_swing_high(self.df, self.current_step)
-                sl_distance = swing_sl - current_price
-                trend_bonus = 0.02 if (market_str == -1.0 or momentum_signal == -1.0) else 0.0
-                if sl_distance <= 0:
+                sl          = find_swing_high(self.df, self.current_step)
+                sl_distance = sl - current_price
+                trend_bonus = 0.01 if market_str == -1.0 else -0.01
+                if sl_distance <= 0 or sl_distance > current_price * 0.05:
                     reward = -0.01
                 else:
-                    self.position            = -1
-                    self.entry_price         = current_price
-                    self.stop_loss           = swing_sl
-                    self.trailing_sl         = swing_sl
-                    self.initial_sl_distance = sl_distance
-                    self.position_size       = self._calc_position_size(current_price, swing_sl)
-                    self.hold_count          = 0
-                    self.total_trades       += 1
-                    self.candles_since_trade = 0
+                    target = current_price - (sl_distance * 3)
+                    self.position    = -1
+                    self.entry_price = current_price
+                    self.stop_loss   = sl
+                    self.target      = target
+                    self.trailing_sl = sl
+                    self.hold_count  = 0
+                    self.total_trades += 1
                     reward = trend_bonus
 
         elif self.position != 0:
             self.hold_count += 1
 
             if self.position == 1:
-                self._update_trailing_sl_long(current_price)
+                if current_price > self.entry_price:
+                    new_trail = current_price - (self.entry_price - self.stop_loss)
+                    self.trailing_sl = max(self.trailing_sl, new_trail)
                 if current_price <= self.trailing_sl:
-                    profit_pct    = (current_price - self.entry_price) / self.entry_price
-                    profit_amount = self.position_size * profit_pct
-                    reward        = profit_amount * 150
-                    self.balance *= (1 + profit_amount)
-                    if profit_amount > 0:
-                        self.winning_trades += 1
+                    profit = (current_price - self.entry_price) / self.entry_price
+                    reward = profit * 150
+                    self.balance *= (1 + profit)
+                    forced_close = True
+                elif current_price >= self.target:
+                    profit = (current_price - self.entry_price) / self.entry_price
+                    reward = profit * 200
+                    self.balance *= (1 + profit)
+                    self.winning_trades += 1
                     forced_close = True
                 elif action == 0 and current_price > self.entry_price:
                     reward = 0.005
@@ -319,14 +340,19 @@ class SPTradingEnv(gym.Env):
                     reward = -0.005
 
             elif self.position == -1:
-                self._update_trailing_sl_short(current_price)
+                if current_price < self.entry_price:
+                    new_trail = current_price + (self.stop_loss - self.entry_price)
+                    self.trailing_sl = min(self.trailing_sl, new_trail)
                 if current_price >= self.trailing_sl:
-                    profit_pct    = (self.entry_price - current_price) / self.entry_price
-                    profit_amount = self.position_size * profit_pct
-                    reward        = profit_amount * 150
-                    self.balance *= (1 + profit_amount)
-                    if profit_amount > 0:
-                        self.winning_trades += 1
+                    profit = (self.entry_price - current_price) / self.entry_price
+                    reward = profit * 150
+                    self.balance *= (1 + profit)
+                    forced_close = True
+                elif current_price <= self.target:
+                    profit = (self.entry_price - current_price) / self.entry_price
+                    reward = profit * 200
+                    self.balance *= (1 + profit)
+                    self.winning_trades += 1
                     forced_close = True
                 elif action == 0 and current_price < self.entry_price:
                     reward = 0.005
@@ -334,309 +360,324 @@ class SPTradingEnv(gym.Env):
                     reward = -0.005
 
             if action == 3 and not forced_close:
-                profit_pct    = (current_price - self.entry_price) / self.entry_price if self.position == 1 \
-                                else (self.entry_price - current_price) / self.entry_price
-                profit_amount = self.position_size * profit_pct
-                reward        = profit_amount * (80 if profit_pct > 0 else 100)
-                self.balance *= (1 + profit_amount)
-                if profit_pct > 0:
+                if self.position == 1:
+                    profit = (current_price - self.entry_price) / self.entry_price
+                else:
+                    profit = (self.entry_price - current_price) / self.entry_price
+                reward = profit * (80 if profit > 0 else 100)
+                self.balance *= (1 + profit)
+                if profit > 0:
                     self.winning_trades += 1
                 forced_close = True
 
             if forced_close:
-                self.position            = 0
-                self.entry_price         = 0.0
-                self.stop_loss           = 0.0
-                self.trailing_sl         = 0.0
-                self.initial_sl_distance = 0.0
-                self.position_size       = 0.0
-                self.hold_count          = 0
-                self.cooldown            = 2
-                self.candles_since_trade = 0
-
-        else:
-            self.candles_since_trade += 1
-            if self.candles_since_trade > 10 and not at_daily_limit:
-                reward = -0.005
+                self.position    = 0
+                self.entry_price = 0.0
+                self.stop_loss   = 0.0
+                self.target      = 0.0
+                self.trailing_sl = 0.0
+                self.hold_count  = 0
+                self.cooldown    = 3
 
         self.current_step += 1
         done = self.current_step >= len(self.df) - 1
         return self._get_obs(), reward, done, False, {}
 
     def reset(self, seed=None):
-        self.current_step        = 60
-        self.balance             = self.initial_balance
-        self.position            = 0
-        self.entry_price         = 0.0
-        self.stop_loss           = 0.0
-        self.trailing_sl         = 0.0
-        self.initial_sl_distance = 0.0
-        self.position_size       = 0.0
-        self.hold_count          = 0
-        self.cooldown            = 0
-        self.total_trades        = 0
-        self.winning_trades      = 0
-        self.max_trades_per_session = 5
-        self.candles_since_trade = 0
+        self.current_step = 60
+        self.balance      = self.initial_balance
+        self.position     = 0
+        self.entry_price  = 0.0
+        self.stop_loss    = 0.0
+        self.target       = 0.0
+        self.trailing_sl  = 0.0
+        self.hold_count   = 0
+        self.cooldown     = 0
+        self.recent_trades = []
+        self.total_trades  = 0
+        self.winning_trades = 0
         return self._get_obs(), {}
-
-# =====================
-# OPEN POSITION: SAVE / LOAD
-# =====================
-OPEN_POS_FILE = 'sp_open_position.json'
-
-def save_open_position(env):
-    data = {
-        'position':            env.position,
-        'entry_price':         env.entry_price,
-        'stop_loss':           env.stop_loss,
-        'trailing_sl':         env.trailing_sl,
-        'initial_sl_distance': env.initial_sl_distance,
-        'position_size':       env.position_size,
-        'hold_count':          env.hold_count,
-    }
-    with open(OPEN_POS_FILE, 'w') as f:
-        json.dump(data, f)
-    print("   Open position saved — next session mein continue hogi")
-
-def load_open_position(env):
-    if not os.path.exists(OPEN_POS_FILE):
-        return False
-    with open(OPEN_POS_FILE, 'r') as f:
-        data = json.load(f)
-    env.position            = data['position']
-    env.entry_price         = data['entry_price']
-    env.stop_loss           = data['stop_loss']
-    env.trailing_sl         = data['trailing_sl']
-    env.initial_sl_distance = data['initial_sl_distance']
-    env.position_size       = data['position_size']
-    env.hold_count          = data['hold_count']
-    os.remove(OPEN_POS_FILE)
-    direction = "LONG" if env.position == 1 else "SHORT"
-    print(f"   Pichli open position restore: {direction} @ ${env.entry_price:,.1f}")
-    return True
 
 # =====================
 # MAIN
 # =====================
 now_ist = datetime.now(IST).strftime("%Y-%m-%d %H:%M")
 print(f"\n{'='*50}")
-print(f"SUBHASHISH PANI RL AGENT v6")
-print(f"Time: {now_ist}")
+print(f"SUBHASHISH PANI RL AGENT v8")
+print(f"Time (IST): {now_ist}")
 print(f"{'='*50}")
 
-send_telegram(f"🤖 SP Agent v6 Started\n⏰ {now_ist}")
+send_telegram(f"🤖 SP Agent v8 Started\n⏰ {now_ist}")
 
 knowledge = load_knowledge()
 
+# ---- DATA FETCH ----
 print("\n1. BTC data fetch ho raha hai...")
-try:
-    exchange = ccxt.kraken()
-    ohlcv    = exchange.fetch_ohlcv('BTC/USD', timeframe='1h', limit=500)
-    print("   Kraken se data mila!")
-except Exception as e:
-    send_telegram(f"❌ Data fetch failed!\n{e}")
-    raise
-
-new_df = pd.DataFrame(ohlcv, columns=['timestamp', 'open', 'high', 'low', 'close', 'volume'])
-new_df['timestamp'] = pd.to_datetime(new_df['timestamp'], unit='ms')
-
-data_file = 'sp_btc_data.csv'
-if os.path.exists(data_file):
-    old_df      = pd.read_csv(data_file)
-    combined_df = pd.concat([old_df, new_df], ignore_index=True)
-    combined_df = combined_df.drop_duplicates('timestamp').reset_index(drop=True)
-    combined_df.to_csv(data_file, index=False)
-    train_df = combined_df
-else:
-    new_df.to_csv(data_file, index=False)
-    train_df = new_df
-
-print(f"   Total candles: {len(train_df)}")
-
-# =====================
-# TRAINING
-# Purana model delete karo — fresh start zaroori hai
-# kyunki v5/v6 mein observation structure badli hai
-# =====================
-print("\n2. Training ho raha hai (200k steps — thoda time lagega)...")
-train_env  = SPTradingEnv(train_df, knowledge)
-model_file = 'sp_rl_model'
-
-if os.path.exists(f'{model_file}.zip'):
-    os.remove(f'{model_file}.zip')
-    print("   Purana model delete kiya — fresh start!")
-
-model = PPO("MlpPolicy", train_env, verbose=0,
-            n_steps=2048, batch_size=64, ent_coef=0.02)
-model.learn(total_timesteps=200000)
-model.save(model_file)
-print("   Model saved!")
-
-print("\n3. Live paper trading...")
-live_ohlcv = None
 for attempt in range(5):
     try:
-        live_ohlcv = exchange.fetch_ohlcv('BTC/USD', timeframe='1h', limit=100)
-        print(f"   Live data mila! (attempt {attempt+1})")
+        exchange = ccxt.kraken()
+        ohlcv    = exchange.fetch_ohlcv('BTC/USD', timeframe='1h', limit=200)
+        print(f"   Data mila! Candles: {len(ohlcv)}")
         break
     except Exception as e:
         print(f"   Attempt {attempt+1} failed: {e}")
         if attempt == 4:
-            send_telegram(f"❌ Live data fetch failed 5 attempts ke baad!\n{e}")
+            send_telegram(f"❌ Data fetch failed!\n{e}")
             raise
         import time
         time.sleep(5)
 
-live_df = pd.DataFrame(live_ohlcv, columns=['timestamp', 'open', 'high', 'low', 'close', 'volume'])
-live_df['timestamp'] = pd.to_datetime(live_df['timestamp'], unit='ms')
-live_df = live_df.reset_index(drop=True)
+df = pd.DataFrame(ohlcv, columns=['timestamp', 'open', 'high', 'low', 'close', 'volume'])
+df['timestamp'] = pd.to_datetime(df['timestamp'], unit='ms')
+df = df.reset_index(drop=True)
 
-live_env = SPTradingEnv(live_df, knowledge)
-obs, _   = live_env.reset()
+data_file = 'sp_btc_data.csv'
+if os.path.exists(data_file):
+    old_df      = pd.read_csv(data_file)
+    combined_df = pd.concat([old_df, df], ignore_index=True)
+    combined_df = combined_df.drop_duplicates('timestamp').reset_index(drop=True)
+    combined_df.to_csv(data_file, index=False)
+    train_df = combined_df
+else:
+    df.to_csv(data_file, index=False)
+    train_df = df
 
-position_restored = load_open_position(live_env)
-if position_restored:
-    direction = "LONG 🟢" if live_env.position == 1 else "SHORT 🔴"
-    send_telegram(
-        f"♻️ Position Restored\n"
-        f"Direction : {direction}\n"
-        f"Entry     : ${live_env.entry_price:,.1f}\n"
-        f"SL        : ${live_env.stop_loss:,.1f}\n"
-        f"Trail SL  : ${live_env.trailing_sl:,.1f}"
-    )
+print(f"   Total candles: {len(train_df)}")
 
-trades_today  = []
-prev_position = 0
-prev_sl       = 0.0
-prev_trail_sl = 0.0
+# ---- TRAINING ----
+print("\n2. Training ho raha hai...")
+train_env  = SPTradingEnv(train_df, knowledge)
+model_file = 'sp_rl_model'
 
-for _ in range(len(live_df) - 61):
-    action, _ = model.predict(obs)
-    action    = int(action)
+if os.path.exists(f'{model_file}.zip'):
+    model = PPO.load(model_file, env=train_env)
+    model.learn(total_timesteps=10000)   # Quick update
+    print("   Model updated!")
+else:
+    model = PPO("MlpPolicy", train_env, verbose=0,
+                n_steps=2048, batch_size=64)
+    model.learn(total_timesteps=50000)
+    print("   Naya model bana!")
 
-    prev_position = live_env.position
-    prev_sl       = live_env.stop_loss
-    prev_trail_sl = live_env.trailing_sl
+model.save(model_file)
+print("   Model saved!")
 
-    obs, reward, done, _, _ = live_env.step(action)
-    current_price = live_df['close'].iloc[live_env.current_step-1]
-    ctime         = candle_time_ist(live_df, live_env.current_step-1)
+# =====================
+# REAL-TIME LIVE TRADING
+# Sirf latest candle pe decision
+# =====================
+print("\n3. Real-time decision...")
 
-    if action == 1 and prev_position == 0 and live_env.position == 1:
-        print(f"   🟢 LONG @ {ctime} | Price: {current_price:.1f} | SL: {live_env.stop_loss:.1f}")
-        trades_today.append({
-            'date': ctime, 'action': 'LONG',
-            'price': current_price,
-            'sl': round(live_env.stop_loss, 1),
-            'trail_sl': round(live_env.trailing_sl, 1),
-            'pos_size': round(live_env.position_size, 3),
-            'profit_pct': 0,
-            'balance': round(live_env.balance, 2),
-            'result': 'OPEN'
-        })
+state = load_state()
+print(f"   Balance     : ${state['balance']:,.2f}")
+print(f"   Position    : {'LONG' if state['position']==1 else 'SHORT' if state['position']==-1 else 'NONE'}")
+print(f"   Trades today: {state['total_trades']}/5")
+
+step          = len(df) - 1   # Latest candle
+current_price = df['close'].iloc[step]
+current_time  = candle_time_ist(df['timestamp'].iloc[step])
+
+print(f"   Latest candle: {current_time} @ ${current_price:,.1f}")
+
+# Cooldown
+if state['cooldown'] > 0:
+    state['cooldown'] -= 1
+    print(f"   Cooldown: {state['cooldown']} candles bacha")
+    save_state(state)
+    send_telegram(f"⏳ Cooldown active\n⏰ {current_time}\n💰 ${current_price:,.1f}")
+    import sys; sys.exit(0)
+
+# Observation + prediction
+obs    = build_obs(df, step, state)
+action = int(model.predict(obs.reshape(1, -1))[0])
+print(f"   RL action: {['HOLD','LONG','SHORT','CLOSE'][action]}")
+
+market_str = get_market_structure(df, step)
+at_limit   = state['total_trades'] >= 5
+
+# ---- EXISTING POSITION CHECK ----
+if state['position'] != 0:
+    state['hold_count'] += 1
+
+    # Trailing SL update
+    if state['position'] == 1 and current_price > state['entry_price']:
+        new_trail = current_price - (state['entry_price'] - state['stop_loss'])
+        state['trailing_sl'] = max(state['trailing_sl'], new_trail)
+    elif state['position'] == -1 and current_price < state['entry_price']:
+        new_trail = current_price + (state['stop_loss'] - state['entry_price'])
+        state['trailing_sl'] = min(state['trailing_sl'], new_trail)
+
+    closed  = False
+    profit  = 0.0
+    reason  = ''
+
+    if state['position'] == 1:
+        if current_price <= state['trailing_sl']:
+            profit = (current_price - state['entry_price']) / state['entry_price']
+            reason = 'Trail SL'
+            closed = True
+        elif current_price >= state['target']:
+            profit = (current_price - state['entry_price']) / state['entry_price']
+            reason = 'Target ✅'
+            closed = True
+
+    elif state['position'] == -1:
+        if current_price >= state['trailing_sl']:
+            profit = (state['entry_price'] - current_price) / state['entry_price']
+            reason = 'Trail SL'
+            closed = True
+        elif current_price <= state['target']:
+            profit = (state['entry_price'] - current_price) / state['entry_price']
+            reason = 'Target ✅'
+            closed = True
+
+    if closed:
+        state['balance'] *= (1 + profit)
+        result = 'WIN' if profit > 0 else 'LOSS'
+        if profit > 0:
+            state['winning_trades'] += 1
+        direction = 'LONG' if state['position'] == 1 else 'SHORT'
+
+        print(f"   {'✅' if result=='WIN' else '❌'} {direction} CLOSE ({reason}) @ ${current_price:,.1f} — {result}")
         send_telegram(
-            f"🟢 LONG ENTRY\n"
-            f"⏰ Candle : {ctime}\n"
-            f"💰 Price  : ${current_price:,.1f}\n"
-            f"🛑 SL     : ${live_env.stop_loss:,.1f}\n"
-            f"📦 Size   : {live_env.position_size:.3f}x\n"
-            f"💼 Balance: ${live_env.balance:,.2f}"
+            f"{'✅' if result=='WIN' else '❌'} {direction} CLOSE — {result} {'🎉' if result=='WIN' else '😞'}\n"
+            f"⏰ Candle  : {current_time}\n"
+            f"📌 Reason  : {reason}\n"
+            f"💰 Price   : ${current_price:,.1f}\n"
+            f"📈 P&L     : {profit*100:.2f}%\n"
+            f"💼 Balance : ${state['balance']:,.2f}"
         )
 
-    elif action == 2 and prev_position == 0 and live_env.position == -1:
-        print(f"   🔴 SHORT @ {ctime} | Price: {current_price:.1f} | SL: {live_env.stop_loss:.1f}")
-        trades_today.append({
-            'date': ctime, 'action': 'SHORT',
+        log_trade({
+            'date': current_time,
+            'action': f'{direction} CLOSE',
             'price': current_price,
-            'sl': round(live_env.stop_loss, 1),
-            'trail_sl': round(live_env.trailing_sl, 1),
-            'pos_size': round(live_env.position_size, 3),
-            'profit_pct': 0,
-            'balance': round(live_env.balance, 2),
-            'result': 'OPEN'
-        })
-        send_telegram(
-            f"🔴 SHORT ENTRY\n"
-            f"⏰ Candle : {ctime}\n"
-            f"💰 Price  : ${current_price:,.1f}\n"
-            f"🛑 SL     : ${live_env.stop_loss:,.1f}\n"
-            f"📦 Size   : {live_env.position_size:.3f}x\n"
-            f"💼 Balance: ${live_env.balance:,.2f}"
-        )
-
-    elif prev_position != 0 and live_env.position == 0:
-        close_label = 'LONG CLOSE' if prev_position == 1 else 'SHORT CLOSE'
-        result      = 'WIN' if reward > 0 else 'LOSS'
-        print(f"   {'✅' if result=='WIN' else '❌'} {close_label} @ {ctime} | {result} | P&L: {reward:.4f}")
-        trades_today.append({
-            'date': ctime, 'action': close_label,
-            'price': current_price,
-            'sl': round(prev_sl, 1),
-            'trail_sl': round(prev_trail_sl, 1),
-            'pos_size': 0,
-            'profit_pct': round(reward, 4),
-            'balance': round(live_env.balance, 2),
+            'sl': round(state['stop_loss'], 1),
+            'target': round(state['target'], 1),
+            'profit_pct': round(profit, 4),
+            'balance': round(state['balance'], 2),
             'result': result
         })
+
+        state['position']    = 0
+        state['entry_price'] = 0.0
+        state['stop_loss']   = 0.0
+        state['target']      = 0.0
+        state['trailing_sl'] = 0.0
+        state['hold_count']  = 0
+        state['cooldown']    = 3
+
+    else:
+        # Position open hai — update bhejo
+        direction = 'LONG' if state['position'] == 1 else 'SHORT'
+        pnl = (current_price - state['entry_price']) / state['entry_price'] if state['position'] == 1 \
+              else (state['entry_price'] - current_price) / state['entry_price']
+        print(f"   📊 {direction} open | Entry: ${state['entry_price']:,.1f} | Trail SL: ${state['trailing_sl']:,.1f} | PnL: {pnl*100:.2f}%")
         send_telegram(
-            f"{'✅' if result == 'WIN' else '❌'} {close_label} — {'WIN 🎉' if result == 'WIN' else 'LOSS 😞'}\n"
-            f"⏰ Candle : {ctime}\n"
-            f"💰 Price  : ${current_price:,.1f}\n"
-            f"📈 P&L    : {reward:.4f}\n"
-            f"💼 Balance: ${live_env.balance:,.2f}"
+            f"📊 {direction} Position Update\n"
+            f"⏰ {current_time}\n"
+            f"💰 Current : ${current_price:,.1f}\n"
+            f"🎯 Target  : ${state['target']:,.1f}\n"
+            f"🛑 Trail SL: ${state['trailing_sl']:,.1f}\n"
+            f"📈 PnL     : {pnl*100:.2f}%\n"
+            f"💼 Balance : ${state['balance']:,.2f}"
         )
 
-    if done:
-        break
+# ---- NEW ENTRY ----
+if state['position'] == 0 and not at_limit and state['cooldown'] == 0:
 
-if live_env.position != 0:
-    save_open_position(live_env)
-    direction = "LONG 🟢" if live_env.position == 1 else "SHORT 🔴"
-    send_telegram(
-        f"⚠️ Session ended — Open position saved!\n"
-        f"Direction : {direction}\n"
-        f"Entry     : ${live_env.entry_price:,.1f}\n"
-        f"SL        : ${live_env.stop_loss:,.1f}\n"
-        f"Trail SL  : ${live_env.trailing_sl:,.1f}\n"
-        f"Next session mein continue hogi ✅"
-    )
+    if action == 1:
+        sl          = find_swing_low(df, step)
+        sl_distance = current_price - sl
+        if sl_distance > 0 and sl_distance <= current_price * 0.05:
+            target = current_price + (sl_distance * 3)
+            state['position']    = 1
+            state['entry_price'] = current_price
+            state['stop_loss']   = sl
+            state['target']      = target
+            state['trailing_sl'] = sl
+            state['hold_count']  = 0
+            state['total_trades'] += 1
 
-log_file    = 'sp_trades_log.csv'
-file_exists = os.path.exists(log_file)
-with open(log_file, 'a', newline='') as f:
-    writer = csv.DictWriter(f, fieldnames=[
-        'date', 'action', 'price', 'sl', 'trail_sl',
-        'pos_size', 'profit_pct', 'balance', 'result'
-    ])
-    if not file_exists:
-        writer.writeheader()
-    writer.writerows(trades_today)
+            print(f"   🟢 LONG @ ${current_price:,.1f} | SL: ${sl:,.1f} | Target: ${target:,.1f}")
+            send_telegram(
+                f"🟢 LONG ENTRY\n"
+                f"⏰ Candle : {current_time}\n"
+                f"💰 Price  : ${current_price:,.1f}\n"
+                f"🛑 SL     : ${sl:,.1f}\n"
+                f"🎯 Target : ${target:,.1f}\n"
+                f"💼 Balance: ${state['balance']:,.2f}"
+            )
+            log_trade({
+                'date': current_time, 'action': 'LONG',
+                'price': current_price,
+                'sl': round(sl, 1), 'target': round(target, 1),
+                'profit_pct': 0,
+                'balance': round(state['balance'], 2),
+                'result': 'OPEN'
+            })
 
-wins         = len([t for t in trades_today if t['result'] == 'WIN'])
-losses       = len([t for t in trades_today if t['result'] == 'LOSS'])
-total        = len(trades_today)
-win_rate_str = f"{(wins/total)*100:.1f}%" if total > 0 else "N/A"
+    elif action == 2:
+        sl          = find_swing_high(df, step)
+        sl_distance = sl - current_price
+        if sl_distance > 0 and sl_distance <= current_price * 0.05:
+            target = current_price - (sl_distance * 3)
+            state['position']    = -1
+            state['entry_price'] = current_price
+            state['stop_loss']   = sl
+            state['target']      = target
+            state['trailing_sl'] = sl
+            state['hold_count']  = 0
+            state['total_trades'] += 1
+
+            print(f"   🔴 SHORT @ ${current_price:,.1f} | SL: ${sl:,.1f} | Target: ${target:,.1f}")
+            send_telegram(
+                f"🔴 SHORT ENTRY\n"
+                f"⏰ Candle : {current_time}\n"
+                f"💰 Price  : ${current_price:,.1f}\n"
+                f"🛑 SL     : ${sl:,.1f}\n"
+                f"🎯 Target : ${target:,.1f}\n"
+                f"💼 Balance: ${state['balance']:,.2f}"
+            )
+            log_trade({
+                'date': current_time, 'action': 'SHORT',
+                'price': current_price,
+                'sl': round(sl, 1), 'target': round(target, 1),
+                'profit_pct': 0,
+                'balance': round(state['balance'], 2),
+                'result': 'OPEN'
+            })
+
+    else:
+        print(f"   ⏸️  HOLD — koi entry signal nahi")
+
+# State save
+save_state(state)
+print(f"   State saved!")
+
+# Daily summary — 00:00, 08:00, 16:00 IST pe
+hour_ist = datetime.now(IST).hour
+if hour_ist in [0, 8, 16]:
+    log_file = 'sp_trades_log.csv'
+    if os.path.exists(log_file):
+        log_df   = pd.read_csv(log_file)
+        today    = datetime.now(IST).strftime("%Y-%m-%d")
+        today_df = log_df[log_df['date'].str.startswith(today)]
+        closed   = today_df[today_df['result'].isin(['WIN', 'LOSS'])]
+        wins     = len(closed[closed['result'] == 'WIN'])
+        losses   = len(closed[closed['result'] == 'LOSS'])
+        total    = len(closed)
+        wr       = f"{(wins/total)*100:.1f}%" if total > 0 else "N/A"
+        send_telegram(
+            f"📊 DAILY SUMMARY ({today})\n"
+            f"📈 Trades  : {total}\n"
+            f"✅ Wins    : {wins}\n"
+            f"❌ Losses  : {losses}\n"
+            f"🎯 Win Rate: {wr}\n"
+            f"💼 Balance : ${state['balance']:,.2f}"
+        )
+        send_telegram_file(log_file, caption="📁 Trade Log CSV")
 
 print(f"\n{'='*50}")
-print(f"COMPLETE!")
-print(f"Trades  : {total}")
-print(f"Wins    : {wins}")
-print(f"Losses  : {losses}")
-if total > 0:
-    print(f"Win Rate: {win_rate_str}")
-print(f"Balance : ${live_env.balance:.2f}")
+print(f"DONE! Balance: ${state['balance']:,.2f}")
 print(f"{'='*50}\n")
-
-send_telegram(
-    f"📊 SESSION COMPLETE\n"
-    f"⏰ {now_ist}\n"
-    f"📈 Trades  : {total}\n"
-    f"✅ Wins    : {wins}\n"
-    f"❌ Losses  : {losses}\n"
-    f"🎯 Win Rate: {win_rate_str}\n"
-    f"💼 Balance : ${live_env.balance:,.2f}"
-)
-
-if os.path.exists(log_file):
-    send_telegram_file(log_file, caption="📁 Trade Log CSV")
