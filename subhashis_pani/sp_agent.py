@@ -15,8 +15,8 @@ IST = timezone(timedelta(hours=5, minutes=30))
 # =====================
 # TELEGRAM CONFIG
 # =====================
-TELEGRAM_TOKEN = "8644074664:AAH-pc-pp4FUpEKsyyUb5rEabiU7eDWfC2Q"
-CHAT_ID        = "711544016"
+TELEGRAM_TOKEN = "tera_bot_token_yahan"
+CHAT_ID        = "tera_chat_id_yahan"
 
 def send_telegram(msg):
     try:
@@ -488,8 +488,9 @@ if state['cooldown'] > 0:
     import sys; sys.exit(0)
 
 # Observation + prediction
-obs    = build_obs(df, step, state)
-action = int(model.predict(obs.reshape(1, -1))[0])
+obs           = build_obs(df, step, state)
+action_arr, _ = model.predict(obs.reshape(1, -1))
+action        = int(action_arr[0])
 print(f"   RL action: {['HOLD','LONG','SHORT','CLOSE'][action]}")
 
 market_str = get_market_structure(df, step)
