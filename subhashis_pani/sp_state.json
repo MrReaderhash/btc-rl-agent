@@ -4,10 +4,10 @@
   "entry_price": 69900.0,
   "stop_loss": 71464.9,
   "target": 65205.30000000002,
-  "trailing_sl": 67424.29999999999,
-  "hold_count": 8,
+  "trailing_sl": 66808.0,
+  "hold_count": 9,
   "cooldown": 0,
   "total_trades": 0,
   "winning_trades": 3,
-  "last_date": "2026-06-03"
+  "last_date": "2026-06-04"
 }
