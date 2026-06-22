@@ -6,7 +6,7 @@
   "target": 0.0,
   "trailing_sl": 0.0,
   "hold_count": 0,
-  "cooldown": 3,
+  "cooldown": 2,
   "total_trades": 0,
   "winning_trades": 7,
   "last_date": "2026-06-23"
