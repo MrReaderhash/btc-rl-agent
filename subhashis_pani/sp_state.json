@@ -1,13 +1,13 @@
 {
   "balance": 10723.626281204772,
-  "position": 0,
-  "entry_price": 0.0,
-  "stop_loss": 0.0,
-  "target": 0.0,
-  "trailing_sl": 0.0,
+  "position": -1,
+  "entry_price": 62742.3,
+  "stop_loss": 63038.2,
+  "target": 61854.60000000002,
+  "trailing_sl": 63038.2,
   "hold_count": 0,
   "cooldown": 0,
-  "total_trades": 0,
+  "total_trades": 1,
   "winning_trades": 9,
   "last_date": "2026-07-05"
 }
