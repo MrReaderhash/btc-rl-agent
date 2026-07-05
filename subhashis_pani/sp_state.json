@@ -5,9 +5,9 @@
   "stop_loss": 63038.2,
   "target": 61854.60000000002,
   "trailing_sl": 62867.59999999999,
-  "hold_count": 1,
+  "hold_count": 2,
   "cooldown": 0,
-  "total_trades": 1,
+  "total_trades": 0,
   "winning_trades": 9,
-  "last_date": "2026-07-05"
+  "last_date": "2026-07-06"
 }
