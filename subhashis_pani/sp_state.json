@@ -5,7 +5,7 @@
   "stop_loss": 78139.0,
   "target": 74837.40000000002,
   "trailing_sl": 77480.5,
-  "hold_count": 4,
+  "hold_count": 5,
   "cooldown": 0,
   "total_trades": 0,
   "winning_trades": 20,
